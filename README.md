@@ -26,44 +26,73 @@ SUPABASE_STORAGE_BUCKET=product-images
 
 3. En Supabase Storage, crea bucket `product-images` con **public ON**.
 
-4. Aplica migración SQL (`supabase/migrations/202602240001_init.sql`):
-   - SQL editor de Supabase, o
-   - CLI:
+4. Aplica migraciones SQL:
+   - `supabase/migrations/202602240001_init.sql`
+   - `supabase/migrations/202602240002_seed_support.sql`
+
+Puedes usar SQL editor o CLI:
 
 ```bash
 supabase db push
 ```
 
-5. Crea owner (después de registrarte con Auth):
-
-```sql
-insert into profiles (user_id, role)
-values ('<USER_UUID>', 'owner')
-on conflict (user_id) do update set role = 'owner';
-```
-
-6. Seed de datos demo:
+5. Ejecuta seed (crea categorías, productos demo, imágenes, variantes y usuario DEV owner):
 
 ```bash
 npm run seed
 ```
 
-7. Levanta app:
+6. Levanta app:
 
 ```bash
 npm run dev
 ```
 
-8. Stripe webhook local:
+7. Stripe webhook local:
 
 ```bash
 stripe listen --forward-to localhost:3000/api/stripe/webhook
 ```
 
+## Credenciales DEV
+
+- **Email:** `julio123@example.com`
+- **Password:** `Julio123`
+- **Username UI:** `JULIO123`
+- **Rol:** `owner`
+
+> ⚠️ Solo para desarrollo. Cambia/rota credenciales en producción.
+
+## Demo products
+
+### Categorías
+- Laundry
+- TV & Audio
+- Kitchen
+- Small Appliances
+- Cleaning
+- Climate
+
+### Productos seed
+1. Lavadora Whirlpool 20kg (variantes 20kg, 24kg)
+2. Secadora Samsung Heat Pump (variantes 7kg, 9kg)
+3. Televisor LG UHD (variantes 50", 55", 65")
+4. Televisor Samsung QLED (variantes 55", 65")
+5. Microondas Panasonic Inverter (simple)
+6. Nevera GE 20ft (simple)
+7. Licuadora Ninja 1000W (simple)
+8. Aspiradora Dyson V-series (variantes V8, V10)
+9. Aire acondicionado Hisense (variantes 12k BTU, 18k BTU)
+10. Lavavajillas Bosch (simple)
+11. Cafetera Keurig (simple)
+12. Robot aspirador iRobot (simple)
+
+> Cada producto incluye 2 imágenes placeholder (URLs públicas, sin binarios).
+
 ## Funcionalidades
 
-- Storefront: home, shop, detalle con variantes, carrito, checkout, success/cancel.
-- Admin: login, guard de /admin/*, dashboard, productos, órdenes, reviews.
+- Storefront: home, shop, detalle con variantes y galería, carrito, checkout, success/cancel.
+- Admin: login, guard de `/admin/*`, dashboard, productos, órdenes, reviews.
 - Stripe: Checkout Sessions + webhook con verificación de firma e idempotencia por `stripe_session_id`.
 - Supabase: RLS y políticas owner/customer/public.
 
