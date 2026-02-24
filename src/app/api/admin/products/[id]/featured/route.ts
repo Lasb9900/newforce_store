@@ -1,0 +1,11 @@
+import { NextResponse } from "next/server";
+import { requireOwnerApi } from "@/lib/auth";
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireOwnerApi();
+  if ("error" in auth) return auth.error;
+  const { id } = await params;
+  const { featured, featured_rank } = await req.json();
+  const { data } = await auth.supabase.from("products").update({ featured, featured_rank }).eq("id", id).select().single();
+  return NextResponse.json({ data });
+}
