@@ -7,7 +7,24 @@ const config: Config = {
     "./src/lib/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        brand: {
+          primary: "var(--brand-primary)",
+          secondary: "var(--brand-secondary)",
+          accent: "var(--brand-accent)",
+          ink: "var(--brand-ink)",
+          bg: "var(--brand-bg)",
+        },
+        surface: "var(--surface)",
+        surfaceMuted: "var(--surface-muted)",
+        uiBorder: "var(--ui-border)",
+        mutedText: "var(--muted-text)",
+      },
+      fontFamily: {
+        sans: ["Poppins", "ui-sans-serif", "system-ui", "sans-serif"],
+      },
+    },
   },
   plugins: [],
 };

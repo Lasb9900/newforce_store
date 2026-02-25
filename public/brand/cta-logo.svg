@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 72" fill="none" role="img" aria-label="Close to Amazon logo">
+  <rect width="72" height="72" rx="12" fill="#0B1577"/>
+  <path d="M20 52V20h9l22 22V20h9v32h-9L29 30v22h-9Z" fill="#fff"/>
+  <path d="M39 16l18 18" stroke="#ED6D1E" stroke-width="4" stroke-linecap="round"/>
+  <text x="84" y="32" fill="#0B1577" font-family="Poppins, Arial, sans-serif" font-size="24" font-weight="700">Close to Amazon</text>
+  <text x="84" y="54" fill="#1B1D3C" font-family="Poppins, Arial, sans-serif" font-size="14" font-weight="500">CTA Commerce</text>
+</svg>

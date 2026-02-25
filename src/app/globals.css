@@ -2,6 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --brand-primary: #0b1577;
+  --brand-secondary: #1b1d3c;
+  --brand-accent: #ed6d1e;
+  --brand-ink: #1d1f1e;
+  --brand-bg: #ffffff;
+
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --ui-border: #e2e8f0;
+  --muted-text: #475569;
+}
+
 body {
-  @apply min-h-screen bg-slate-50 text-slate-900 antialiased;
+  @apply min-h-screen bg-surfaceMuted text-brand-ink antialiased font-sans;
+}
+
+@layer base {
+  h1 { @apply text-3xl md:text-4xl font-extrabold; }
+  h2 { @apply text-2xl font-bold; }
+  h3 { @apply text-xl font-semibold; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-md bg-brand-accent px-4 py-2 font-semibold text-white shadow-sm transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent focus-visible:ring-offset-2;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-md border border-brand-primary px-4 py-2 font-semibold text-brand-primary transition hover:bg-brand-primary hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2;
+  }
 }

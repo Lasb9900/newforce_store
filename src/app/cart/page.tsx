@@ -41,20 +41,18 @@ export default function CartPage() {
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5">
-      <h1 className="mb-4 text-2xl font-bold">Carrito</h1>
+    <div className="rounded-xl border border-uiBorder bg-surface p-5 shadow-sm">
+      <h1 className="mb-1 text-2xl font-bold">Carrito</h1>
+      <p className="mb-4 text-sm text-mutedText">Revisa cantidades y valida stock antes de checkout.</p>
       {items.map((item, index) => (
-        <CartItemRow
-          key={`${item.productId}-${item.variantId}-${index}`}
-          item={item}
-          onQty={(qty) => updateQty(index, qty)}
-          onRemove={() => remove(index)}
-        />
+        <CartItemRow key={`${item.productId}-${item.variantId}-${index}`} item={item} onQty={(qty) => updateQty(index, qty)} onRemove={() => remove(index)} />
       ))}
-      <p className="mt-4 text-xl font-semibold">Total: {formatCurrency(total)}</p>
-      <button onClick={checkout} disabled={loading || !items.length} className="mt-3 rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50">
-        Checkout
-      </button>
+      <div className="mt-4 flex items-center justify-between">
+        <p className="text-xl font-bold text-brand-primary">Total: {formatCurrency(total)}</p>
+        <button onClick={checkout} disabled={loading || !items.length} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60">
+          Checkout
+        </button>
+      </div>
     </div>
   );
 }

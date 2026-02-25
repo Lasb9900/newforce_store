@@ -14,11 +14,11 @@ export function AddToCart({ product }: { product: Product }) {
   const stock = variant?.stock ?? product.base_stock;
 
   return (
-    <div className="space-y-3 rounded border p-4">
+    <div className="space-y-3 rounded-lg border border-uiBorder bg-surfaceMuted p-4">
       {product.has_variants && product.variants && <VariantSelector variants={product.variants} value={variantId} onChange={setVariantId} />}
-      <p className="font-semibold">{formatCurrency(price)} · Stock {stock}</p>
+      <p className="text-sm font-semibold text-brand-primary">{formatCurrency(price)} · Stock {stock}</p>
       <button
-        className="rounded bg-black px-4 py-2 text-white"
+        className="btn-primary w-full"
         onClick={() =>
           addItem({
             productId: variant ? undefined : product.id,
@@ -31,7 +31,7 @@ export function AddToCart({ product }: { product: Product }) {
           })
         }
       >
-        Add to cart
+        Agregar al carrito
       </button>
     </div>
   );

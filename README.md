@@ -4,6 +4,27 @@ E-commerce con **Next.js App Router + TypeScript + Tailwind + Supabase + Stripe*
 
 ## Setup rápido
 
+## Guía rápida de branding (Close to Amazon)
+
+- Tokens de marca implementados en `src/app/globals.css` y `tailwind.config.ts`:
+  - `brand.primary`: `#0B1577`
+  - `brand.secondary`: `#1B1D3C`
+  - `brand.accent`: `#ED6D1E`
+  - `brand.ink`: `#1D1F1E`
+- Tipografía oficial: **Poppins** (via `next/font/google` en `src/app/layout.tsx`).
+  - En entornos con red restringida, `NEXT_PUBLIC_ENABLE_GOOGLE_FONTS` queda en `0` por defecto para evitar fallo de build; establece `1` para descargar y aplicar Poppins real.
+- Logo/isotipo cableados en:
+  - Header storefront: `/public/brand/cta-logo.svg`
+  - Admin shell + icono app: `/public/brand/cta-isotipo.svg` y `src/app/icon.svg`
+
+### Reemplazo de assets finales del manual
+
+1. Sustituye estos archivos manteniendo el mismo nombre y proporción:
+   - `public/brand/cta-logo.svg`
+   - `public/brand/cta-isotipo.svg`
+2. No alteres colores/proporciones del arte final.
+3. No requiere cambios de código si conservas los mismos nombres.
+
 1. Instala dependencias:
 
 ```bash
