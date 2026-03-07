@@ -12,22 +12,50 @@ const schema = z.object({
   SUPABASE_STORAGE_BUCKET: z.string().default("product-images"),
 });
 
-function normalizeSupabaseUrl(rawUrl: string): string {
-  // In some local setups, a Docker-internal hostname like "postgresql"
-  // leaks into env vars and is not resolvable from the host process.
-  if (process.env.NODE_ENV === "production") return rawUrl;
+function inferProjectRefFromDbUrl(dbUrl: URL): string | null {
+  // Example username from Supabase DB URL: postgres.<project_ref>
+  const userMatch = dbUrl.username.match(/(?:postgres|postgresql)\.([a-z0-9]{20})/i);
+  if (userMatch?.[1]) return userMatch[1].toLowerCase();
 
+  // Example host patterns that may include project ref.
+  const hostMatch = dbUrl.hostname.match(/(?:db\.)?([a-z0-9]{20})\.(?:supabase\.co|supabase\.com)/i);
+  if (hostMatch?.[1]) return hostMatch[1].toLowerCase();
+
+  return null;
+}
+
+function normalizeSupabaseUrl(rawUrl: string): string {
   const parsed = new URL(rawUrl);
-  if (parsed.hostname !== "postgresql") {
+
+  // Already valid for supabase-js.
+  if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+    // In some local setups, a Docker-internal hostname like "postgresql"
+    // leaks into env vars and is not resolvable from the host process.
+    if (process.env.NODE_ENV !== "production" && parsed.hostname === "postgresql") {
+      parsed.protocol = "http:";
+      parsed.hostname = "127.0.0.1";
+      parsed.port = "54321";
+    }
+
     return parsed.toString().replace(/\/$/, "");
   }
 
-  // Supabase local defaults to the API gateway on 54321 over HTTP.
-  parsed.protocol = "http:";
-  parsed.hostname = "127.0.0.1";
-  parsed.port = "54321";
+  // If user pasted a Postgres connection string in NEXT_PUBLIC_SUPABASE_URL,
+  // convert it to the Supabase API URL when we can infer the project ref.
+  if (parsed.protocol === "postgresql:" || parsed.protocol === "postgres:") {
+    const projectRef = inferProjectRefFromDbUrl(parsed);
+    if (projectRef) {
+      return `https://${projectRef}.supabase.co`;
+    }
 
-  return parsed.toString().replace(/\/$/, "");
+    // Fallback for local Supabase when a docker hostname leaked in.
+    if (process.env.NODE_ENV !== "production") {
+      return "http://127.0.0.1:54321";
+    }
+  }
+
+  // Last safe fallback to avoid crashing the app shell with invalidsupabaseUrl.
+  return "https://example.supabase.co";
 }
 
 const parsedEnv = schema.parse(process.env);
