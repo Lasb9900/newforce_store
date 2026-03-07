@@ -14,6 +14,8 @@ export type Product = {
   category_id: string | null;
   tags: string[];
   sku: string | null;
+  redeemable: boolean;
+  points_price: number | null;
   created_at: string;
   updated_at: string;
   category?: { id: string; name: string; slug: string } | null;

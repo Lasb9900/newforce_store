@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Poppins } from "next/font/google";
 import { CartBadgeLink } from "@/components/nav/CartBadgeLink";
+import { getServerSupabase } from "@/lib/supabase";
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -10,7 +11,10 @@ const poppins = Poppins({
   display: "swap",
 });
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const supabase = await getServerSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+
   return (
     <html lang="es">
       <body className={`${poppins.className} min-h-screen bg-surfaceMuted text-brand-ink`}>
@@ -24,6 +28,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <Link href="/shop" className="rounded px-3 py-1.5 hover:bg-white/10">Shop</Link>
               <CartBadgeLink />
               <Link href="/wishlist" className="rounded px-3 py-1.5 hover:bg-white/10">Wishlist</Link>
+              {user ? <Link href="/account" className="rounded px-3 py-1.5 hover:bg-white/10">Cuenta</Link> : <Link href="/login" className="rounded px-3 py-1.5 hover:bg-white/10">Login</Link>}
             </div>
           </nav>
         </header>

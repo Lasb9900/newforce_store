@@ -12,6 +12,7 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
 
   const sb = await getServerSupabase();
+  const { data: { user } } = await sb.auth.getUser();
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
 
   for (const item of parsed.data.items) {
@@ -58,6 +59,7 @@ export async function POST(req: Request) {
   }
 
   const session = await stripe.checkout.sessions.create({
+    client_reference_id: user?.id,
     mode: "payment",
     line_items: lineItems,
     shipping_address_collection: { allowed_countries: ["US"] },
