@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "NEXT_FONT_GOOGLE_MOCKED_RESPONSES=./src/lib/fonts/google-font-mocks.js next dev",
-    "build": "NEXT_FONT_GOOGLE_MOCKED_RESPONSES=./src/lib/fonts/google-font-mocks.js next build",
+    "dev": "cross-env NEXT_FONT_GOOGLE_MOCKED_RESPONSES=./src/lib/fonts/google-font-mocks.js next dev",
+    "build": "cross-env NEXT_FONT_GOOGLE_MOCKED_RESPONSES=./src/lib/fonts/google-font-mocks.js next build",
     "start": "next start",
     "lint": "eslint",
     "seed": "tsx scripts/seed.ts"
@@ -28,6 +28,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.20",
+    "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "postcss": "^8.4.49",
