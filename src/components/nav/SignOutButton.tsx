@@ -1,18 +1,24 @@
 "use client";
 
+import clsx from "clsx";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
 
-export default function SignOutButton() {
+type Props = {
+  className?: string;
+  children?: React.ReactNode;
+};
+
+export default function SignOutButton({ className, children }: Props) {
   return (
     <button
-      className="rounded px-3 py-1.5 hover:bg-white/10"
+      className={clsx("rounded px-3 py-1.5", className)}
       onClick={async () => {
         const supabase = getBrowserSupabase();
         await supabase.auth.signOut();
         location.href = "/";
       }}
     >
-      Logout
+      {children ?? "Logout"}
     </button>
   );
 }

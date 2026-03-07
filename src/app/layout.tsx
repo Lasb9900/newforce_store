@@ -4,7 +4,6 @@ import Link from "next/link";
 import { Poppins } from "next/font/google";
 import { CartBadgeLink } from "@/components/nav/CartBadgeLink";
 import { getServerSupabase } from "@/lib/supabase";
-import SignOutButton from "@/components/nav/SignOutButton";
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -29,10 +28,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               <Link href="/shop" className="rounded px-3 py-1.5 hover:bg-white/10">Shop</Link>
               <CartBadgeLink />
               <Link href="/wishlist" className="rounded px-3 py-1.5 hover:bg-white/10">Wishlist</Link>
-              {user ? <>
-                <Link href="/account" className="rounded px-3 py-1.5 hover:bg-white/10">Cuenta</Link>
-                <SignOutButton />
-              </> : <Link href="/login" className="rounded px-3 py-1.5 hover:bg-white/10">Login</Link>}
+              {user ? <Link href="/account" className="rounded px-3 py-1.5 hover:bg-white/10">Cuenta</Link> : <Link href="/login" className="rounded px-3 py-1.5 hover:bg-white/10">Login</Link>}
             </div>
           </nav>
         </header>

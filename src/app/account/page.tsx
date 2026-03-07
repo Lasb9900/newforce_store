@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireCustomerPage } from "@/lib/auth";
+import SignOutButton from "@/components/nav/SignOutButton";
 
 export default async function AccountPage() {
   const { supabase, user, profile } = await requireCustomerPage("/login?next=/account");
@@ -16,7 +17,10 @@ export default async function AccountPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Mi cuenta</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Mi cuenta</h1>
+        <SignOutButton className="border border-uiBorder bg-surface hover:bg-surfaceMuted">Cerrar sesión</SignOutButton>
+      </div>
       <div className="grid gap-4 md:grid-cols-2">
         <article className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm">
           <p className="text-xs uppercase text-mutedText">Perfil</p>
