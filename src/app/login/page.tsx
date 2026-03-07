@@ -3,7 +3,11 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { getBrowserSupabase } from "@/lib/supabase-browser";
+
+function toErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return "Error de red inesperado";
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -17,17 +21,28 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const supabase = getBrowserSupabase();
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
 
-    if (signInError) {
-      setError(signInError.message);
-      return;
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+      setLoading(false);
+
+      if (!res.ok) {
+        setError(data.error || "No se pudo iniciar sesión");
+        return;
+      }
+
+      router.push(searchParams.get("next") || "/account");
+      router.refresh();
+    } catch (err) {
+      setLoading(false);
+      setError(`Error de conexión: ${toErrorMessage(err)}`);
     }
-
-    router.push(searchParams.get("next") || "/account");
-    router.refresh();
   }
 
   return (

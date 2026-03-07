@@ -67,3 +67,9 @@ export const redeemPointsSchema = z.object({
   productId: z.string().uuid(),
   qty: z.number().int().positive().max(20),
 });
+
+
+export const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+});
