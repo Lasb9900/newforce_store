@@ -42,3 +42,28 @@ export const adminVariantSchema = z.object({
   sku: z.string().nullable().optional(),
   active: z.boolean().default(true),
 });
+
+
+export const registerSchema = z.object({
+  first_name: z.string().min(2),
+  last_name: z.string().min(2),
+  email: z.string().email(),
+  phone: z.string().min(7),
+  password: z.string().min(8),
+});
+
+export const posItemSchema = z.object({
+  productId: z.string().uuid(),
+  qty: z.number().int().positive(),
+});
+
+export const createPosSaleSchema = z.object({
+  customerEmail: z.string().email().optional(),
+  paymentMethod: z.string().min(2).default("cash"),
+  items: z.array(posItemSchema).min(1),
+});
+
+export const redeemPointsSchema = z.object({
+  productId: z.string().uuid(),
+  qty: z.number().int().positive().max(20),
+});
