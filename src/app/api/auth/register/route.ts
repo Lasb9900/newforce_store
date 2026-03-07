@@ -43,11 +43,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, userId: signUpData.user.id });
   } catch (error) {
     const message = toErrorMessage(error);
-    if (message.includes("ENOTFOUND") || message.includes("fetch failed")) {
+    if (message.includes("ENOTFOUND") || message.includes("ECONNREFUSED") || message.includes("fetch failed")) {
       return NextResponse.json(
         {
           error:
-            "No se pudo conectar con Supabase. Verifica NEXT_PUBLIC_SUPABASE_URL (debe ser accesible desde tu máquina, por ejemplo http://127.0.0.1:54321 en local).",
+            "No se pudo conectar con Supabase. Verifica NEXT_PUBLIC_SUPABASE_URL (debe apuntar al gateway de API; en local normalmente http://127.0.0.1:54321).",
           details: message,
         },
         { status: 503 },

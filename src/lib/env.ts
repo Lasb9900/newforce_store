@@ -13,14 +13,19 @@ const schema = z.object({
 });
 
 function normalizeSupabaseUrl(rawUrl: string): string {
-  // In some local Windows setups, a Docker-internal hostname like "postgresql"
+  // In some local setups, a Docker-internal hostname like "postgresql"
   // leaks into env vars and is not resolvable from the host process.
   if (process.env.NODE_ENV === "production") return rawUrl;
 
   const parsed = new URL(rawUrl);
-  if (parsed.hostname === "postgresql") {
-    parsed.hostname = "127.0.0.1";
+  if (parsed.hostname !== "postgresql") {
+    return parsed.toString().replace(/\/$/, "");
   }
+
+  // Supabase local defaults to the API gateway on 54321 over HTTP.
+  parsed.protocol = "http:";
+  parsed.hostname = "127.0.0.1";
+  parsed.port = "54321";
 
   return parsed.toString().replace(/\/$/, "");
 }
