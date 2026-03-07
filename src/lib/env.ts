@@ -12,4 +12,22 @@ const schema = z.object({
   SUPABASE_STORAGE_BUCKET: z.string().default("product-images"),
 });
 
-export const env = schema.parse(process.env);
+function normalizeSupabaseUrl(rawUrl: string): string {
+  // In some local Windows setups, a Docker-internal hostname like "postgresql"
+  // leaks into env vars and is not resolvable from the host process.
+  if (process.env.NODE_ENV === "production") return rawUrl;
+
+  const parsed = new URL(rawUrl);
+  if (parsed.hostname === "postgresql") {
+    parsed.hostname = "127.0.0.1";
+  }
+
+  return parsed.toString().replace(/\/$/, "");
+}
+
+const parsedEnv = schema.parse(process.env);
+
+export const env = {
+  ...parsedEnv,
+  NEXT_PUBLIC_SUPABASE_URL: normalizeSupabaseUrl(parsedEnv.NEXT_PUBLIC_SUPABASE_URL),
+};
