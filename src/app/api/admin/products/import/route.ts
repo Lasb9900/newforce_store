@@ -1,21 +1,52 @@
 import { NextResponse } from "next/server";
 import { requireOwnerApi } from "@/lib/auth";
 
+const REQUIRED_HEADERS = ["item #", "department", "item description", "qty", "seller category", "category", "condition"] as const;
+
 type CsvRow = {
-  name: string;
-  description: string | null;
-  price_usd: number | null;
-  stock: number;
-  active: boolean;
-  featured: boolean;
-  sku: string | null;
-  category_slug: string | null;
+  itemNumber: string;
+  department: string;
+  itemDescription: string;
+  qty: number;
+  sellerCategory: string;
+  category: string;
+  condition: string;
 };
+
+function normalizeHeader(header: string) {
+  return header.replace(/\s+/g, " ").trim().toLowerCase();
+}
 
 function parseBoolean(value: string | undefined, fallback = false) {
   if (!value) return fallback;
-  const normalized = value.trim().toLowerCase();
-  return ["1", "true", "yes", "si", "sí"].includes(normalized);
+  return ["1", "true", "yes", "si", "sí"].includes(value.trim().toLowerCase());
+}
+
+function parseCsvLine(line: string) {
+  const values: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      const next = line[i + 1];
+      if (inQuotes && next === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      values.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  values.push(current.trim());
+  return values;
 }
 
 function parseCsv(content: string) {
@@ -26,58 +57,60 @@ function parseCsv(content: string) {
 
   if (!lines.length) throw new Error("CSV vacío");
 
-  const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
-  const requiredHeaders = ["name"];
+  const headersRaw = parseCsvLine(lines[0]);
+  const headers = headersRaw.map(normalizeHeader);
 
-  for (const header of requiredHeaders) {
+  for (const header of REQUIRED_HEADERS) {
     if (!headers.includes(header)) {
-      throw new Error(`Falta columna requerida: ${header}`);
+      throw new Error(`Falta columna obligatoria: ${header}`);
     }
   }
 
-  const index = (key: string) => headers.indexOf(key);
+  const idx = (header: string) => headers.indexOf(header);
 
-  const rows: Array<{ line: number; data: CsvRow }> = [];
+  const rows: Array<{ line: number; data: CsvRow; active: boolean; featured: boolean }> = [];
   const errors: string[] = [];
 
   for (let i = 1; i < lines.length; i += 1) {
-    const values = lines[i].split(",").map((v) => v.trim());
+    const values = parseCsvLine(lines[i]);
 
-    const name = values[index("name")] || "";
-    if (!name) {
-      errors.push(`Línea ${i + 1}: name es obligatorio`);
+    const itemNumber = values[idx("item #")]?.trim() || "";
+    const department = values[idx("department")]?.trim() || "";
+    const itemDescription = values[idx("item description")]?.trim() || "";
+    const qtyRaw = values[idx("qty")]?.trim() || "";
+    const sellerCategory = values[idx("seller category")]?.trim() || "";
+    const category = values[idx("category")]?.trim() || "";
+    const condition = values[idx("condition")]?.trim() || "";
+
+    if (!itemNumber || !itemDescription || !qtyRaw || !category) {
+      errors.push(`Línea ${i + 1}: faltan campos obligatorios (Item #, Item Description, Qty, Category)`);
       continue;
     }
 
-    const priceRaw = values[index("price_usd")];
-    const priceUsd = priceRaw ? Number(priceRaw) : null;
-    if (priceRaw && Number.isNaN(priceUsd)) {
-      errors.push(`Línea ${i + 1}: price_usd inválido`);
+    const qty = Number(qtyRaw);
+    if (Number.isNaN(qty) || qty < 0) {
+      errors.push(`Línea ${i + 1}: Qty inválido`);
       continue;
     }
 
-    const stockRaw = values[index("stock")];
-    const stock = stockRaw ? Number(stockRaw) : 0;
-    if (Number.isNaN(stock) || stock < 0) {
-      errors.push(`Línea ${i + 1}: stock inválido`);
-      continue;
-    }
-
-    const row: CsvRow = {
-      name,
-      description: values[index("description")] || null,
-      price_usd: priceUsd,
-      stock,
-      active: parseBoolean(values[index("active")], true),
-      featured: parseBoolean(values[index("featured")], false),
-      sku: values[index("sku")] || null,
-      category_slug: values[index("category_slug")] || null,
-    };
-
-    rows.push({ line: i + 1, data: row });
+    rows.push({
+      line: i + 1,
+      data: { itemNumber, department, itemDescription, qty, sellerCategory, category, condition },
+      active: parseBoolean(values[idx("active")], true),
+      featured: parseBoolean(values[idx("featured")], false),
+    });
   }
 
-  return { rows, errors, headers };
+  return { rows, errors };
+}
+
+function slugifyCategory(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
 }
 
 export async function POST(req: Request) {
@@ -103,50 +136,78 @@ export async function POST(req: Request) {
   const summary = { imported: 0, updated: 0, failed: parsed.errors.length };
   const rowErrors = [...parsed.errors];
 
-  const slugs = parsed.rows.map((r) => r.data.category_slug).filter(Boolean) as string[];
-  const { data: categories } = slugs.length
-    ? await auth.supabase.from("categories").select("id,slug").in("slug", slugs)
-    : { data: [] as Array<{ id: string; slug: string }> };
-  const categoryMap = new Map((categories ?? []).map((c) => [c.slug, c.id]));
+  const categoryNames = [...new Set(parsed.rows.map((r) => r.data.category).filter(Boolean))];
+  const categorySlugs = categoryNames.map(slugifyCategory).filter(Boolean);
+
+  const { data: existingCategories } = categorySlugs.length
+    ? await auth.supabase.from("categories").select("id,name,slug").in("slug", categorySlugs)
+    : { data: [] as Array<{ id: string; name: string; slug: string }> };
+
+  const categoryMap = new Map((existingCategories ?? []).map((c) => [c.slug, c.id]));
+
+  for (const category of categoryNames) {
+    const slug = slugifyCategory(category);
+    if (!slug || categoryMap.has(slug)) continue;
+
+    const { data: created, error } = await auth.supabase
+      .from("categories")
+      .insert({ name: category, slug })
+      .select("id,slug")
+      .single();
+
+    if (!error && created) {
+      categoryMap.set(created.slug, created.id);
+    }
+  }
 
   for (const row of parsed.rows) {
-    const payload = {
-      name: row.data.name,
-      description: row.data.description,
-      base_price_cents: row.data.price_usd == null ? null : Math.round(row.data.price_usd * 100),
-      base_stock: row.data.stock,
-      active: row.data.active,
-      featured: row.data.featured,
-      sku: row.data.sku,
-      category_id: row.data.category_slug ? categoryMap.get(row.data.category_slug) ?? null : null,
-    };
+    const categorySlug = slugifyCategory(row.data.category);
+    const categoryId = categoryMap.get(categorySlug) ?? null;
 
-    if (row.data.category_slug && !categoryMap.has(row.data.category_slug)) {
+    if (!categoryId) {
       summary.failed += 1;
-      rowErrors.push(`Línea ${row.line}: category_slug '${row.data.category_slug}' no existe`);
+      rowErrors.push(`Línea ${row.line}: no se pudo resolver Category '${row.data.category}'`);
       continue;
     }
 
-    if (row.data.sku) {
-      const { data: existingBySku } = await auth.supabase
-        .from("products")
-        .select("id")
-        .eq("sku", row.data.sku)
-        .maybeSingle();
+    const payload = {
+      sku: row.data.itemNumber,
+      name: row.data.itemDescription,
+      item_description: row.data.itemDescription,
+      department: row.data.department || null,
+      seller_category: row.data.sellerCategory || null,
+      item_condition: row.data.condition || null,
+      category_id: categoryId,
+      base_stock: row.data.qty,
+      active: row.active,
+      featured: row.featured,
+    };
 
-      if (existingBySku?.id) {
-        const { error } = await auth.supabase.from("products").update(payload).eq("id", existingBySku.id);
-        if (error) {
-          summary.failed += 1;
-          rowErrors.push(`Línea ${row.line}: ${error.message}`);
-        } else {
-          summary.updated += 1;
-        }
-        continue;
+    const { data: existingBySku } = await auth.supabase
+      .from("products")
+      .select("id")
+      .eq("sku", row.data.itemNumber)
+      .maybeSingle();
+
+    if (existingBySku?.id) {
+      const { error } = await auth.supabase.from("products").update(payload).eq("id", existingBySku.id);
+      if (error) {
+        summary.failed += 1;
+        rowErrors.push(`Línea ${row.line}: ${error.message}`);
+      } else {
+        summary.updated += 1;
       }
+      continue;
     }
 
-    const { error } = await auth.supabase.from("products").insert(payload);
+    const { error } = await auth.supabase.from("products").insert({
+      ...payload,
+      base_price_cents: null,
+      has_variants: false,
+      featured_rank: 0,
+      tags: [],
+    });
+
     if (error) {
       summary.failed += 1;
       rowErrors.push(`Línea ${row.line}: ${error.message}`);
@@ -159,7 +220,7 @@ export async function POST(req: Request) {
     data: {
       summary,
       errors: rowErrors.slice(0, 30),
-      expectedColumns: ["name", "description", "price_usd", "stock", "active", "featured", "sku", "category_slug"],
+      expectedColumns: ["Item #", "Department", "Item Description", "Qty", "Seller Category", "Category", "Condition"],
     },
   });
 }

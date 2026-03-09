@@ -6,12 +6,17 @@ type ProductRow = {
   id: string;
   name: string;
   sku: string | null;
+  department: string | null;
+  item_description: string | null;
+  seller_category: string | null;
+  item_condition: string | null;
   base_price_cents: number | null;
   base_stock: number;
   active: boolean;
   featured: boolean;
   has_variants: boolean;
   category_id: string | null;
+  category?: { name?: string | null; slug?: string | null } | null;
 };
 
 type ProductForm = {
@@ -25,6 +30,10 @@ type ProductForm = {
   has_variants: boolean;
   sku: string;
   category_id: string | null;
+  department: string;
+  item_description: string;
+  seller_category: string;
+  item_condition: string;
   tags: string[];
 };
 
@@ -39,6 +48,10 @@ const EMPTY_FORM: ProductForm = {
   has_variants: false,
   sku: "",
   category_id: null,
+  department: "",
+  item_description: "",
+  seller_category: "",
+  item_condition: "",
   tags: [],
 };
 
@@ -58,7 +71,8 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       const matchQuery =
         !query ||
         product.name.toLowerCase().includes(query.toLowerCase()) ||
-        (product.sku ?? "").toLowerCase().includes(query.toLowerCase());
+        (product.sku ?? "").toLowerCase().includes(query.toLowerCase()) ||
+        (product.item_description ?? "").toLowerCase().includes(query.toLowerCase());
 
       const matchActive =
         activeFilter === "all" ||
@@ -95,6 +109,10 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       has_variants: product.has_variants,
       sku: product.sku ?? "",
       category_id: product.category_id,
+      department: product.department ?? "",
+      item_description: product.item_description ?? "",
+      seller_category: product.seller_category ?? "",
+      item_condition: product.item_condition ?? "",
       tags: [],
     });
     setMessage(null);
@@ -126,6 +144,10 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       name: form.name.trim(),
       description: form.description || null,
       sku: form.sku || null,
+      department: form.department || null,
+      item_description: form.item_description || null,
+      seller_category: form.seller_category || null,
+      item_condition: form.item_condition || null,
     };
 
     const endpoint = editingId ? `/api/admin/products/${editingId}` : "/api/admin/products";
@@ -217,17 +239,20 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       </div>
 
       <form onSubmit={importCsv} className="flex flex-wrap items-center gap-2 rounded-xl border border-uiBorder bg-surface p-3">
-        <p className="text-sm text-mutedText">Formato CSV: name,description,price_usd,stock,active,featured,sku,category_slug</p>
+        <p className="text-sm text-mutedText">Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition</p>
         <button type="submit" className="rounded-md border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted">Cargar CSV</button>
         {csvFile ? <p className="text-xs text-mutedText">Archivo: {csvFile.name}</p> : null}
       </form>
 
       <form onSubmit={saveProduct} className="grid gap-3 rounded-xl border border-uiBorder bg-surface p-4 shadow-sm md:grid-cols-2">
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Nombre" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="SKU" value={form.sku} onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5 md:col-span-2" placeholder="Descripción" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Item # / SKU" value={form.sku} onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))} />
+        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Item Description / Nombre" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required />
+        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Department" value={form.department} onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))} />
+        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Seller Category" value={form.seller_category} onChange={(e) => setForm((f) => ({ ...f, seller_category: e.target.value }))} />
+        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Condition" value={form.item_condition} onChange={(e) => setForm((f) => ({ ...f, item_condition: e.target.value }))} />
+        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Descripción extendida" value={form.item_description} onChange={(e) => setForm((f) => ({ ...f, item_description: e.target.value }))} />
         <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Precio (cents)" value={form.base_price_cents ?? ""} onChange={(e) => setForm((f) => ({ ...f, base_price_cents: e.target.value === "" ? null : Number(e.target.value) }))} />
-        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Stock" value={form.base_stock} onChange={(e) => setForm((f) => ({ ...f, base_stock: Number(e.target.value) }))} />
+        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Qty / Stock" value={form.base_stock} onChange={(e) => setForm((f) => ({ ...f, base_stock: Number(e.target.value) }))} />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} /> Activo</label>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.featured} onChange={(e) => setForm((f) => ({ ...f, featured: e.target.checked }))} /> Featured</label>
         <div className="md:col-span-2 flex items-center gap-2">
@@ -241,7 +266,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <input className="rounded-md border border-uiBorder p-2 text-sm" placeholder="Buscar por nombre o SKU" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input className="rounded-md border border-uiBorder p-2 text-sm" placeholder="Buscar por item#, nombre o descripción" value={query} onChange={(e) => setQuery(e.target.value)} />
         <select className="rounded-md border border-uiBorder p-2 text-sm" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value as "all" | "active" | "inactive") }>
           <option value="all">Todos</option>
           <option value="active">Activos</option>
@@ -253,13 +278,13 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         <table className="w-full text-sm">
           <thead className="bg-surfaceMuted text-left text-mutedText">
             <tr>
-              <th className="px-3 py-2">Nombre</th>
-              <th className="px-3 py-2">SKU</th>
-              <th className="px-3 py-2">Precio</th>
-              <th className="px-3 py-2">Stock</th>
-              <th className="px-3 py-2">Activo</th>
-              <th className="px-3 py-2">Featured</th>
-              <th className="px-3 py-2">Variantes</th>
+              <th className="px-3 py-2">Item #</th>
+              <th className="px-3 py-2">Department</th>
+              <th className="px-3 py-2">Item Description</th>
+              <th className="px-3 py-2">Qty</th>
+              <th className="px-3 py-2">Seller Category</th>
+              <th className="px-3 py-2">Category</th>
+              <th className="px-3 py-2">Condition</th>
               <th className="px-3 py-2">Acciones</th>
             </tr>
           </thead>
@@ -271,13 +296,13 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
             ) : (
               filtered.map((p) => (
                 <tr key={p.id} className="border-t border-uiBorder">
-                  <td className="px-3 py-2 font-medium">{p.name}</td>
                   <td className="px-3 py-2">{p.sku ?? "—"}</td>
-                  <td className="px-3 py-2">{p.base_price_cents == null ? "—" : `$${(p.base_price_cents / 100).toFixed(2)}`}</td>
+                  <td className="px-3 py-2">{p.department ?? "—"}</td>
+                  <td className="px-3 py-2 font-medium">{p.item_description || p.name}</td>
                   <td className="px-3 py-2">{p.base_stock}</td>
-                  <td className="px-3 py-2">{String(p.active)}</td>
-                  <td className="px-3 py-2">{String(p.featured)}</td>
-                  <td className="px-3 py-2">{String(p.has_variants)}</td>
+                  <td className="px-3 py-2">{p.seller_category ?? "—"}</td>
+                  <td className="px-3 py-2">{p.category?.name ?? "—"}</td>
+                  <td className="px-3 py-2">{p.item_condition ?? "—"}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <button className="rounded border border-uiBorder px-2 py-1 text-xs" type="button" onClick={() => startEdit(p)}>Editar</button>
