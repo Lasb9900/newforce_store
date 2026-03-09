@@ -2,6 +2,17 @@
 
 import { useMemo, useState } from "react";
 
+type ParsedImportRow = {
+  line?: number;
+  itemNumber: string;
+  department: string;
+  itemDescription: string;
+  qty: number;
+  sellerCategory: string;
+  category: string;
+  condition: string;
+};
+
 type ProductRow = {
   id: string;
   name: string;
@@ -17,6 +28,7 @@ type ProductRow = {
   has_variants: boolean;
   category_id: string | null;
   category?: { name?: string | null; slug?: string | null } | null;
+  image_url?: string | null;
 };
 
 type ProductForm = {
@@ -64,8 +76,10 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<string | null>(null);
-  const [importPreview, setImportPreview] = useState<Array<Record<string, string | number>>>([]);
+  const [importPreview, setImportPreview] = useState<ParsedImportRow[]>([]);
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     return products.filter((product) => {
@@ -87,7 +101,14 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     const res = await fetch("/api/admin/products", { cache: "no-store" });
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || "No se pudo refrescar productos");
-    setProducts((json.data ?? []).map((p: ProductRow) => ({ ...p })));
+
+    const normalized = (json.data ?? []).map((row: ProductRow & { images?: Array<{ url: string; sort_order: number }> }) => {
+      const images = Array.isArray(row.images) ? [...row.images] : [];
+      const primary = images.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0];
+      return { ...row, image_url: primary?.url ?? row.image_url ?? null };
+    });
+
+    setProducts(normalized);
   }
 
   function startNewProduct() {
@@ -95,6 +116,8 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     setForm(EMPTY_FORM);
     setError(null);
     setMessage(null);
+    setImageFile(null);
+    setImagePreview(null);
   }
 
   function startEdit(product: ProductRow) {
@@ -118,6 +141,28 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     });
     setMessage(null);
     setError(null);
+    setImageFile(null);
+    setImagePreview(product.image_url ?? null);
+  }
+
+  async function uploadImage(productId: string) {
+    if (!imageFile) return;
+
+    const fd = new FormData();
+    fd.append("file", imageFile);
+
+    const response = await fetch(`/api/admin/products/${productId}/image-upload`, {
+      method: "POST",
+      body: fd,
+    });
+
+    const json = await response.json();
+    if (!response.ok) {
+      throw new Error(json.error || "No se pudo subir imagen");
+    }
+
+    setImagePreview(json.data?.url ?? null);
+    setImageFile(null);
   }
 
   async function saveProduct(e: React.FormEvent) {
@@ -165,9 +210,20 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       return;
     }
 
+    const productId = json.data?.id ?? editingId;
+    if (productId && imageFile) {
+      try {
+        await uploadImage(productId);
+      } catch (uploadError) {
+        setError((uploadError as Error).message);
+        return;
+      }
+    }
+
     setMessage(editingId ? "Producto actualizado" : "Producto creado");
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setImageFile(null);
     await refreshProducts();
   }
 
@@ -185,7 +241,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     await refreshProducts();
   }
 
-  async function importCsv(e: React.FormEvent) {
+  async function parseCsv(e: React.FormEvent) {
     e.preventDefault();
     if (!csvFile) {
       setError("Selecciona un archivo CSV");
@@ -202,23 +258,47 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     const json = await response.json();
 
     if (!response.ok) {
-      setError(json.error || "No se pudo importar CSV");
+      setError(json.error || "No se pudo leer CSV");
       setImportResult(null);
       return;
     }
 
     const summary = json.data?.summary;
-    setImportResult(
-      `CSV leído: ${summary.parsedRows} filas válidas · ${summary.failedRows} filas con error`,
-    );
-    setMessage("Parseo CSV completado (sin guardar en base de datos en esta fase)");
-    setCsvFile(null);
-    setImportPreview((json.data?.preview ?? []) as Array<Record<string, string | number>>);
+    setImportResult(`CSV leído: ${summary.parsedRows} filas válidas · ${summary.failedRows} filas con error`);
+    setMessage("Parseo CSV completado");
+    setImportPreview((json.data?.preview ?? []) as ParsedImportRow[]);
 
     const errs = json.data?.errors as string[] | undefined;
     if (errs?.length) {
       setError(`Filas con error: ${errs.slice(0, 3).join(" | ")}`);
     }
+  }
+
+  async function confirmImport() {
+    if (!importPreview.length) {
+      setError("No hay filas parseadas para importar");
+      return;
+    }
+
+    const response = await fetch("/api/admin/products/import/commit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ rows: importPreview }),
+    });
+
+    const json = await response.json();
+    if (!response.ok) {
+      setError(json.error || "No se pudo guardar importación");
+      return;
+    }
+
+    const s = json.data?.summary;
+    setMessage(`Importación guardada. Insertados: ${s.inserted} · Actualizados: ${s.updated} · Fallidos: ${s.failed}`);
+    const errs = json.data?.errors as string[] | undefined;
+    setError(errs?.length ? `Errores: ${errs.slice(0, 3).join(" | ")}` : null);
+    setImportPreview([]);
+    setCsvFile(null);
+    await refreshProducts();
   }
 
   return (
@@ -239,9 +319,12 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         </div>
       </div>
 
-      <form onSubmit={importCsv} className="flex flex-wrap items-center gap-2 rounded-xl border border-uiBorder bg-surface p-3">
-        <p className="text-sm text-mutedText">Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition (solo parseo en esta fase)</p>
-        <button type="submit" className="rounded-md border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted">Cargar CSV</button>
+      <form onSubmit={parseCsv} className="flex flex-wrap items-center gap-2 rounded-xl border border-uiBorder bg-surface p-3">
+        <p className="text-sm text-mutedText">Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition</p>
+        <button type="submit" className="rounded-md border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted">Leer CSV</button>
+        {importPreview.length > 0 ? (
+          <button type="button" onClick={confirmImport} className="btn-primary">Guardar importación</button>
+        ) : null}
         {csvFile ? <p className="text-xs text-mutedText">Archivo: {csvFile.name}</p> : null}
       </form>
 
@@ -254,6 +337,30 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         <input className="rounded-md border border-uiBorder p-2.5" placeholder="Descripción extendida" value={form.item_description} onChange={(e) => setForm((f) => ({ ...f, item_description: e.target.value }))} />
         <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Precio (cents)" value={form.base_price_cents ?? ""} onChange={(e) => setForm((f) => ({ ...f, base_price_cents: e.target.value === "" ? null : Number(e.target.value) }))} />
         <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Qty / Stock" value={form.base_stock} onChange={(e) => setForm((f) => ({ ...f, base_stock: Number(e.target.value) }))} />
+
+        <div className="md:col-span-2 rounded-md border border-uiBorder p-3">
+          <p className="mb-2 text-sm font-semibold">Foto del producto</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="cursor-pointer rounded border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted">
+              Subir imagen
+              <input
+                type="file"
+                accept="image/jpeg,image/jpg,image/png,image/webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  setImageFile(file);
+                  if (file) {
+                    setImagePreview(URL.createObjectURL(file));
+                  }
+                }}
+              />
+            </label>
+            {imageFile ? <span className="text-xs text-mutedText">{imageFile.name}</span> : null}
+            {imagePreview ? <img src={imagePreview} alt="preview" className="h-14 w-14 rounded object-cover border border-uiBorder" /> : <span className="text-xs text-mutedText">Sin imagen</span>}
+          </div>
+        </div>
+
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} /> Activo</label>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.featured} onChange={(e) => setForm((f) => ({ ...f, featured: e.target.checked }))} /> Featured</label>
         <div className="md:col-span-2 flex items-center gap-2">
@@ -313,6 +420,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         <table className="w-full text-sm">
           <thead className="bg-surfaceMuted text-left text-mutedText">
             <tr>
+              <th className="px-3 py-2">Foto</th>
               <th className="px-3 py-2">Item #</th>
               <th className="px-3 py-2">Department</th>
               <th className="px-3 py-2">Item Description</th>
@@ -326,11 +434,12 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-mutedText" colSpan={8}>No hay productos para mostrar</td>
+                <td className="px-3 py-8 text-center text-mutedText" colSpan={9}>No hay productos para mostrar</td>
               </tr>
             ) : (
               filtered.map((p) => (
                 <tr key={p.id} className="border-t border-uiBorder">
+                  <td className="px-3 py-2">{p.image_url ? <img src={p.image_url} alt={p.name} className="h-10 w-10 rounded object-cover border border-uiBorder" /> : <span className="text-xs text-mutedText">Sin foto</span>}</td>
                   <td className="px-3 py-2">{p.sku ?? "—"}</td>
                   <td className="px-3 py-2">{p.department ?? "—"}</td>
                   <td className="px-3 py-2 font-medium">{p.item_description || p.name}</td>
