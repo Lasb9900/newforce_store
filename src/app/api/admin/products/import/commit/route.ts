@@ -71,6 +71,7 @@ export async function POST(req: Request) {
       item_description: row.itemDescription,
       department: row.department || null,
       seller_category: row.sellerCategory || null,
+      category: row.category || null,
       item_condition: row.condition || null,
       condition: row.condition || null,
       category_id: categoryId,

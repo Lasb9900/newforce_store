@@ -48,5 +48,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   if (imageError) return NextResponse.json({ error: imageError.message }, { status: 400 });
 
+  const { error: productUpdateError } = await service.from("products").update({ image_url: imageUrl }).eq("id", id);
+  if (productUpdateError) return NextResponse.json({ error: productUpdateError.message }, { status: 400 });
+
   return NextResponse.json({ data: imageRow });
 }

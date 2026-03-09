@@ -6,6 +6,7 @@ export type Product = {
   description: string | null;
   currency: Currency;
   base_price_cents: number | null;
+  price_cents: number | null;
   base_stock: number;
   has_variants: boolean;
   active: boolean;
@@ -21,6 +22,7 @@ export type Product = {
   item_condition: string | null;
   condition: string | null;
   qty: number;
+  image_url: string | null;
   redeemable: boolean;
   points_price: number | null;
   created_at: string;
