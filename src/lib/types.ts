@@ -14,10 +14,13 @@ export type Product = {
   category_id: string | null;
   tags: string[];
   sku: string | null;
+  item_number: string | null;
   department: string | null;
   item_description: string | null;
   seller_category: string | null;
   item_condition: string | null;
+  condition: string | null;
+  qty: number;
   redeemable: boolean;
   points_price: number | null;
   created_at: string;

@@ -66,16 +66,23 @@ export async function POST(req: Request) {
 
     const payload = {
       sku: row.itemNumber,
+      item_number: row.itemNumber,
       name: row.itemDescription,
       item_description: row.itemDescription,
       department: row.department || null,
       seller_category: row.sellerCategory || null,
       item_condition: row.condition || null,
+      condition: row.condition || null,
       category_id: categoryId,
       base_stock: Math.max(0, Math.round(row.qty)),
+      qty: Math.max(0, Math.round(row.qty)),
     };
 
-    const { data: existing } = await auth.supabase.from("products").select("id").eq("sku", row.itemNumber).maybeSingle();
+    const { data: existing } = await auth.supabase
+      .from("products")
+      .select("id")
+      .or(`sku.eq.${row.itemNumber},item_number.eq.${row.itemNumber}`)
+      .maybeSingle();
 
     if (existing?.id) {
       const { error } = await auth.supabase.from("products").update(payload).eq("id", existing.id);

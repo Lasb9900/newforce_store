@@ -26,16 +26,19 @@ export const adminProductSchema = z.object({
   category_id: z.string().uuid().nullable().optional(),
   tags: z.array(z.string()).default([]),
   sku: z.string().nullable().optional(),
+  item_number: z.string().nullable().optional(),
   department: z.string().nullable().optional(),
   item_description: z.string().nullable().optional(),
   seller_category: z.string().nullable().optional(),
   item_condition: z.string().nullable().optional(),
+  condition: z.string().nullable().optional(),
   active: z.boolean().default(true),
   featured: z.boolean().default(false),
   featured_rank: z.number().int().default(0),
   has_variants: z.boolean().default(false),
   base_price_cents: z.number().int().nonnegative().nullable().optional(),
   base_stock: z.number().int().nonnegative().default(0),
+  qty: z.number().int().nonnegative().optional(),
 });
 
 export const adminVariantSchema = z.object({
