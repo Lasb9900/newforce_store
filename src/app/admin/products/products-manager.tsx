@@ -64,6 +64,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [importPreview, setImportPreview] = useState<Array<Record<string, string | number>>>([]);
   const [csvFile, setCsvFile] = useState<File | null>(null);
 
   const filtered = useMemo(() => {
@@ -208,15 +209,15 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
 
     const summary = json.data?.summary;
     setImportResult(
-      `Importados: ${summary.imported} · Actualizados: ${summary.updated} · Fallidos: ${summary.failed}`,
+      `CSV leído: ${summary.parsedRows} filas válidas · ${summary.failedRows} filas con error`,
     );
-    setMessage("Importación CSV completada");
+    setMessage("Parseo CSV completado (sin guardar en base de datos en esta fase)");
     setCsvFile(null);
-    await refreshProducts();
+    setImportPreview((json.data?.preview ?? []) as Array<Record<string, string | number>>);
 
     const errs = json.data?.errors as string[] | undefined;
     if (errs?.length) {
-      setError(`Algunas filas fallaron: ${errs.slice(0, 3).join(" | ")}`);
+      setError(`Filas con error: ${errs.slice(0, 3).join(" | ")}`);
     }
   }
 
@@ -239,7 +240,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       </div>
 
       <form onSubmit={importCsv} className="flex flex-wrap items-center gap-2 rounded-xl border border-uiBorder bg-surface p-3">
-        <p className="text-sm text-mutedText">Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition</p>
+        <p className="text-sm text-mutedText">Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition (solo parseo en esta fase)</p>
         <button type="submit" className="rounded-md border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted">Cargar CSV</button>
         {csvFile ? <p className="text-xs text-mutedText">Archivo: {csvFile.name}</p> : null}
       </form>
@@ -264,6 +265,40 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       {message ? <p className="text-sm text-green-700">{message}</p> : null}
       {importResult ? <p className="text-sm text-brand-secondary">{importResult}</p> : null}
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
+
+      {importPreview.length > 0 ? (
+        <div className="rounded-xl border border-uiBorder bg-surface p-3">
+          <p className="mb-2 text-sm font-semibold">Vista previa CSV (primeras 20 filas)</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-surfaceMuted text-left">
+                <tr>
+                  <th className="px-2 py-1">Item #</th>
+                  <th className="px-2 py-1">Department</th>
+                  <th className="px-2 py-1">Item Description</th>
+                  <th className="px-2 py-1">Qty</th>
+                  <th className="px-2 py-1">Seller Category</th>
+                  <th className="px-2 py-1">Category</th>
+                  <th className="px-2 py-1">Condition</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importPreview.map((row, idx) => (
+                  <tr key={idx} className="border-t border-uiBorder">
+                    <td className="px-2 py-1">{String(row.itemNumber ?? "")}</td>
+                    <td className="px-2 py-1">{String(row.department ?? "")}</td>
+                    <td className="px-2 py-1">{String(row.itemDescription ?? "")}</td>
+                    <td className="px-2 py-1">{String(row.qty ?? "")}</td>
+                    <td className="px-2 py-1">{String(row.sellerCategory ?? "")}</td>
+                    <td className="px-2 py-1">{String(row.category ?? "")}</td>
+                    <td className="px-2 py-1">{String(row.condition ?? "")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <input className="rounded-md border border-uiBorder p-2 text-sm" placeholder="Buscar por item#, nombre o descripción" value={query} onChange={(e) => setQuery(e.target.value)} />
