@@ -36,6 +36,7 @@ function formatCurrency(cents: number | null) {
 }
 
 export default function PosForm({ products }: { products: PosProduct[] }) {
+  const [localProducts, setLocalProducts] = useState(products);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(products[0]?.id ?? "");
   const [qty, setQty] = useState(1);
@@ -51,18 +52,18 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
 
   const filteredProducts = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter((p) =>
+    if (!q) return localProducts;
+    return localProducts.filter((p) =>
       [p.name, p.item_number ?? "", p.sku ?? "", p.category ?? ""]
         .join(" ")
         .toLowerCase()
         .includes(q),
     );
-  }, [products, query]);
+  }, [localProducts, query]);
 
   const selectedProduct = useMemo(
-    () => products.find((p) => p.id === selected) ?? null,
-    [products, selected],
+    () => localProducts.find((p) => p.id === selected) ?? null,
+    [localProducts, selected],
   );
 
   async function onSubmit(e: React.FormEvent) {
@@ -119,6 +120,7 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
         totalCents: data.totalCents,
         createdAt: data.createdAt ?? new Date().toISOString(),
       });
+      setLocalProducts((prev) => prev.map((p) => (p.id === selected ? { ...p, qty: Math.max(0, p.qty - qty) } : p)));
       setQty(1);
       setCustomerEmail("");
       setPaymentReference("");
@@ -218,7 +220,7 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
           <p>Orden: {lastSale.orderId}</p>
           <p>Producto: {lastSale.productName}</p>
           <p>Cantidad: {lastSale.qty}</p>
-          <p>Método de pago: {lastSale.paymentMethod}</p>
+          <p>Método de pago: {PAYMENT_METHODS.find((m) => m.value === lastSale.paymentMethod)?.label ?? lastSale.paymentMethod}</p>
           <p>Referencia: {lastSale.paymentReference ?? "—"}</p>
           <p>Total: {formatCurrency(lastSale.totalCents)}</p>
         </div>
