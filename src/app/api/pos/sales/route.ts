@@ -3,16 +3,22 @@ import { createPosSaleSchema } from "@/lib/schemas";
 import { requireSellerApi } from "@/lib/auth";
 import { getServiceSupabase } from "@/lib/supabase";
 
+const VALID_PAYMENT_METHODS = new Set(["cash", "card", "transfer"]);
+
 export async function POST(req: Request) {
   const auth = await requireSellerApi();
   if ("error" in auth) return auth.error;
 
   const parsed = createPosSaleSchema.safeParse(await req.json());
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: "Payload inválido", details: parsed.error.flatten() }, { status: 400 });
 
   const admin = getServiceSupabase();
   let customerId: string | null = null;
   let customerEmail: string | null = null;
+
+  if (!VALID_PAYMENT_METHODS.has(parsed.data.paymentMethod)) {
+    return NextResponse.json({ error: "Método de pago inválido" }, { status: 400 });
+  }
 
   if (parsed.data.customerEmail) {
     const { data: profile } = await admin
@@ -25,11 +31,31 @@ export async function POST(req: Request) {
   }
 
   const item = parsed.data.items[0];
-  const { data: product } = await admin.from("products").select("id,name,base_price_cents,base_stock").eq("id", item.productId).single();
-  if (!product?.base_price_cents) return NextResponse.json({ error: "Producto inválido" }, { status: 400 });
-  if (product.base_stock < item.qty) return NextResponse.json({ error: "Stock insuficiente" }, { status: 400 });
+  if (!item?.productId) return NextResponse.json({ error: "Producto no informado" }, { status: 400 });
+  if (!item?.qty || item.qty <= 0) return NextResponse.json({ error: "Cantidad inválida" }, { status: 400 });
 
-  const totalCents = product.base_price_cents * item.qty;
+  const { data: product, error: productError } = await admin
+    .from("products")
+    .select("id,name,active,price_cents,base_price_cents,qty,base_stock")
+    .eq("id", item.productId)
+    .maybeSingle();
+
+  if (productError) return NextResponse.json({ error: `No se pudo validar producto: ${productError.message}` }, { status: 400 });
+  if (!product) return NextResponse.json({ error: "Producto no encontrado" }, { status: 404 });
+  if (!product.active) return NextResponse.json({ error: "Producto inactivo" }, { status: 400 });
+
+  const priceCents = product.price_cents ?? product.base_price_cents;
+  const stock = product.qty ?? product.base_stock ?? 0;
+
+  if (priceCents == null || priceCents < 0) {
+    return NextResponse.json({ error: "Precio inválido" }, { status: 400 });
+  }
+
+  if (stock < item.qty) {
+    return NextResponse.json({ error: `Stock insuficiente. Disponible: ${stock}` }, { status: 400 });
+  }
+
+  const totalCents = priceCents * item.qty;
   const pointsEarned = customerId ? Math.floor(totalCents / 100) : 0;
 
   const { data: order, error: orderError } = await admin
@@ -47,26 +73,28 @@ export async function POST(req: Request) {
       channel: "physical_store",
       points_earned: pointsEarned,
     })
-    .select("id")
+    .select("id,created_at")
     .single();
 
-  if (orderError || !order) return NextResponse.json({ error: orderError?.message || "Error creando venta" }, { status: 500 });
+  if (orderError || !order) return NextResponse.json({ error: orderError?.message || "No se pudo registrar la venta" }, { status: 500 });
 
-  await admin.from("order_items").insert({
+  const { error: itemError } = await admin.from("order_items").insert({
     order_id: order.id,
     product_id: product.id,
     name_snapshot: product.name,
-    unit_price_cents_snapshot: product.base_price_cents,
+    unit_price_cents_snapshot: priceCents,
     qty: item.qty,
   });
 
+  if (itemError) return NextResponse.json({ error: `No se pudo registrar el detalle de venta: ${itemError.message}` }, { status: 500 });
+
   const { error: stockError } = await admin
     .from("products")
-    .update({ base_stock: product.base_stock - item.qty })
+    .update({ base_stock: stock - item.qty, qty: stock - item.qty })
     .eq("id", product.id)
-    .gte("base_stock", item.qty);
+    .gte("qty", item.qty);
 
-  if (stockError) return NextResponse.json({ error: stockError.message }, { status: 400 });
+  if (stockError) return NextResponse.json({ error: `No se pudo actualizar stock: ${stockError.message}` }, { status: 400 });
 
   if (customerId && pointsEarned > 0) {
     await admin.rpc("add_points", {
@@ -78,5 +106,11 @@ export async function POST(req: Request) {
     });
   }
 
-  return NextResponse.json({ ok: true, orderId: order.id, pointsEarned });
+  return NextResponse.json({
+    ok: true,
+    orderId: order.id,
+    pointsEarned,
+    totalCents,
+    createdAt: order.created_at,
+  });
 }

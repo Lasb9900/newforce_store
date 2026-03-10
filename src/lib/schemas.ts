@@ -68,7 +68,7 @@ export const posItemSchema = z.object({
 
 export const createPosSaleSchema = z.object({
   customerEmail: z.string().email().optional(),
-  paymentMethod: z.string().min(2).default("cash"),
+  paymentMethod: z.enum(["cash", "card", "transfer"]).default("cash"),
   items: z.array(posItemSchema).min(1),
 });
 
