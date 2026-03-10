@@ -7,13 +7,21 @@ import { env } from "./env";
 
 export async function getServerSupabase() {
   const cookieStore = await cookies();
+
   return createServerClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
     cookies: {
       getAll: () => cookieStore.getAll(),
       setAll: (cookiesToSet) => {
-        cookiesToSet.forEach(({ name, value, options }) => {
-          cookieStore.set(name, value, options);
-        });
+        // In Server Components, Next.js may expose a read-only cookie store.
+        // Avoid crashing SSR when Supabase tries to refresh auth cookies there.
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // Ignore in read-only contexts (render). Cookies can still be
+          // persisted in mutable contexts like Route Handlers/Server Actions.
+        }
       },
     },
   });

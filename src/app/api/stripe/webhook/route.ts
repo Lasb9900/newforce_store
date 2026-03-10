@@ -30,12 +30,7 @@ export async function POST(req: Request) {
   const session = event.data.object;
   const admin = getServiceSupabase();
 
-  const { data: existingOrder } = await admin
-    .from("orders")
-    .select("id")
-    .eq("stripe_session_id", session.id)
-    .maybeSingle();
-
+  const { data: existingOrder } = await admin.from("orders").select("id,user_id").eq("stripe_session_id", session.id).maybeSingle();
   if (existingOrder) {
     return NextResponse.json({ received: true, idempotent: true });
   }
@@ -50,12 +45,16 @@ export async function POST(req: Request) {
       buyer_name: session.customer_details?.name ?? null,
       buyer_phone: session.customer_details?.phone ?? null,
       status: "paid",
+      payment_status: "paid",
+      payment_method: "stripe",
+      channel: "online",
       subtotal_cents: Number(session.amount_subtotal ?? 0),
       total_cents: Number(session.amount_total ?? 0),
       currency: String(session.currency || "usd").toUpperCase(),
       stripe_session_id: session.id,
       stripe_payment_intent_id: String(session.payment_intent || ""),
       shipping_address: session.customer_details?.address ?? null,
+      points_earned: Math.floor(Number(session.amount_total ?? 0) / 100),
     })
     .select()
     .single();
@@ -71,11 +70,9 @@ export async function POST(req: Request) {
         .select("id,product_id,variant_name,price_cents,products(name)")
         .eq("id", item.variantId)
         .single();
-
       if (!variant) continue;
 
       const variantProduct = Array.isArray(variant.products) ? variant.products[0] : variant.products;
-
       await admin.from("order_items").insert({
         order_id: order.id,
         product_id: variant.product_id,
@@ -85,7 +82,6 @@ export async function POST(req: Request) {
         unit_price_cents_snapshot: variant.price_cents,
         qty: item.qty,
       });
-
       await admin.rpc("decrement_variant_stock", { variant_id: variant.id, qty: item.qty });
     } else if (item.productId) {
       const { data: product } = await admin.from("products").select("id,name,base_price_cents").eq("id", item.productId).single();
@@ -98,9 +94,18 @@ export async function POST(req: Request) {
         unit_price_cents_snapshot: product.base_price_cents,
         qty: item.qty,
       });
-
       await admin.rpc("decrement_product_stock", { product_id: product.id, qty: item.qty });
     }
+  }
+
+  if (order.user_id && order.points_earned > 0) {
+    await admin.rpc("add_points", {
+      p_user_id: order.user_id,
+      p_points: order.points_earned,
+      p_order_id: order.id,
+      p_description: `Puntos por orden online ${order.id}`,
+      p_created_by: null,
+    });
   }
 
   return NextResponse.json({ received: true });

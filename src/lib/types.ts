@@ -6,6 +6,7 @@ export type Product = {
   description: string | null;
   currency: Currency;
   base_price_cents: number | null;
+  price_cents: number | null;
   base_stock: number;
   has_variants: boolean;
   active: boolean;
@@ -14,6 +15,15 @@ export type Product = {
   category_id: string | null;
   tags: string[];
   sku: string | null;
+  item_number: string | null;
+  department: string | null;
+  item_description: string | null;
+  seller_category: string | null;
+  condition: string | null;
+  qty: number;
+  image_url: string | null;
+  redeemable: boolean;
+  points_price: number | null;
   created_at: string;
   updated_at: string;
   category?: { id: string; name: string; slug: string } | null;

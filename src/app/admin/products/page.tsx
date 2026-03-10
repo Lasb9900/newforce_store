@@ -1,34 +1,24 @@
 import { requireOwnerPage } from "@/lib/auth";
+import ProductsManager from "./products-manager";
 
 export default async function AdminProducts() {
   const { supabase } = await requireOwnerPage();
-  const { data } = await supabase.from("products").select("id,name,active,has_variants,featured").order("created_at", { ascending: false });
+  const { data } = await supabase
+    .from("products")
+    .select("id,name,sku,item_number,department,item_description,seller_category,category,condition,qty,base_price_cents,price_cents,base_stock,image_url,active,featured,has_variants,category_id,category_ref:categories(name,slug),images:product_images(id,url,sort_order)")
+    .order("created_at", { ascending: false });
 
-  return (
-    <div className="rounded-xl border border-uiBorder bg-surface p-6 shadow-sm">
-      <h1 className="mb-4 text-2xl font-bold">Productos</h1>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-surfaceMuted text-left text-mutedText">
-            <tr>
-              <th className="px-3 py-2">Nombre</th>
-              <th className="px-3 py-2">Activo</th>
-              <th className="px-3 py-2">Variantes</th>
-              <th className="px-3 py-2">Featured</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(data ?? []).map((p) => (
-              <tr key={p.id} className="border-t border-uiBorder">
-                <td className="px-3 py-2 font-medium">{p.name}</td>
-                <td className="px-3 py-2">{String(p.active)}</td>
-                <td className="px-3 py-2">{String(p.has_variants)}</td>
-                <td className="px-3 py-2">{String(p.featured)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  const normalized = (data ?? []).map((row) => {
+    const categoryRef = Array.isArray(row.category_ref) ? row.category_ref[0] ?? null : row.category_ref;
+    const images = Array.isArray(row.images) ? [...row.images] : [];
+    const primary = images.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0];
+
+    return {
+      ...row,
+      category_ref: categoryRef,
+      image_url: row.image_url ?? primary?.url ?? null,
+    };
+  });
+
+  return <ProductsManager initialProducts={normalized} />;
 }
