@@ -29,7 +29,7 @@ function normalizeProductPayload(payload: Record<string, unknown>) {
 export async function GET() {
   const auth = await requireOwnerApi();
   if ("error" in auth) return auth.error;
-  const { data } = await auth.supabase.from("products").select("*, category:categories(name,slug), variants:product_variants(*), images:product_images(*)");
+  const { data } = await auth.supabase.from("products").select("*, category_ref:categories(name,slug), variants:product_variants(*), images:product_images(*)");
   return NextResponse.json({ data: data ?? [] });
 }
 

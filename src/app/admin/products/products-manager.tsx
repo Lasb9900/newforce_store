@@ -17,17 +17,22 @@ type ProductRow = {
   id: string;
   name: string;
   sku: string | null;
+  item_number?: string | null;
   department: string | null;
   item_description: string | null;
   seller_category: string | null;
+  category: string | null;
+  condition?: string | null;
   item_condition: string | null;
   base_price_cents: number | null;
+  price_cents?: number | null;
   base_stock: number;
+  qty?: number;
   active: boolean;
   featured: boolean;
   has_variants: boolean;
   category_id: string | null;
-  category?: { name?: string | null; slug?: string | null } | null;
+  category_ref?: { name?: string | null; slug?: string | null } | null;
   image_url?: string | null;
 };
 
@@ -45,7 +50,11 @@ type ProductForm = {
   department: string;
   item_description: string;
   seller_category: string;
+  category: string;
   item_condition: string;
+  condition: string;
+  price_cents: number | null;
+  qty: number;
   tags: string[];
 };
 
@@ -63,14 +72,18 @@ const EMPTY_FORM: ProductForm = {
   department: "",
   item_description: "",
   seller_category: "",
+  category: "",
   item_condition: "",
+  condition: "",
+  price_cents: null,
+  qty: 0,
   tags: [],
 };
 
 export default function ProductsManager({ initialProducts }: { initialProducts: ProductRow[] }) {
   const [products, setProducts] = useState<ProductRow[]>(initialProducts);
   const [query, setQuery] = useState("");
-  const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive">("all");
+  const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive" | "featured">("all");
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -87,11 +100,16 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         !query ||
         product.name.toLowerCase().includes(query.toLowerCase()) ||
         (product.sku ?? "").toLowerCase().includes(query.toLowerCase()) ||
-        (product.item_description ?? "").toLowerCase().includes(query.toLowerCase());
+        (product.item_description ?? "").toLowerCase().includes(query.toLowerCase()) ||
+        (product.category ?? "").toLowerCase().includes(query.toLowerCase());
 
       const matchActive =
         activeFilter === "all" ||
-        (activeFilter === "active" ? product.active : !product.active);
+        (activeFilter === "active"
+          ? product.active
+          : activeFilter === "inactive"
+            ? !product.active
+            : product.featured);
 
       return matchQuery && matchActive;
     });
@@ -136,7 +154,11 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       department: product.department ?? "",
       item_description: product.item_description ?? "",
       seller_category: product.seller_category ?? "",
+      category: product.category ?? product.category_ref?.name ?? "",
       item_condition: product.item_condition ?? "",
+      condition: product.condition ?? product.item_condition ?? "",
+      price_cents: product.price_cents ?? product.base_price_cents,
+      qty: product.qty ?? product.base_stock,
       tags: [],
     });
     setMessage(null);
@@ -193,7 +215,11 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       department: form.department || null,
       item_description: form.item_description || null,
       seller_category: form.seller_category || null,
-      item_condition: form.item_condition || null,
+      category: form.category || null,
+      item_condition: form.item_condition || form.condition || null,
+      condition: form.condition || form.item_condition || null,
+      price_cents: form.price_cents ?? form.base_price_cents ?? null,
+      qty: form.qty ?? form.base_stock,
     };
 
     const endpoint = editingId ? `/api/admin/products/${editingId}` : "/api/admin/products";
@@ -333,10 +359,12 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         <input className="rounded-md border border-uiBorder p-2.5" placeholder="Item Description / Nombre" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required />
         <input className="rounded-md border border-uiBorder p-2.5" placeholder="Department" value={form.department} onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))} />
         <input className="rounded-md border border-uiBorder p-2.5" placeholder="Seller Category" value={form.seller_category} onChange={(e) => setForm((f) => ({ ...f, seller_category: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Condition" value={form.item_condition} onChange={(e) => setForm((f) => ({ ...f, item_condition: e.target.value }))} />
+        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Category" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
+        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Condition" value={form.condition} onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value, item_condition: e.target.value }))} />
         <input className="rounded-md border border-uiBorder p-2.5" placeholder="Descripción extendida" value={form.item_description} onChange={(e) => setForm((f) => ({ ...f, item_description: e.target.value }))} />
         <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Precio (cents)" value={form.base_price_cents ?? ""} onChange={(e) => setForm((f) => ({ ...f, base_price_cents: e.target.value === "" ? null : Number(e.target.value) }))} />
-        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Qty / Stock" value={form.base_stock} onChange={(e) => setForm((f) => ({ ...f, base_stock: Number(e.target.value) }))} />
+        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Precio compat (price_cents)" value={form.price_cents ?? ""} onChange={(e) => setForm((f) => ({ ...f, price_cents: e.target.value === "" ? null : Number(e.target.value) }))} />
+        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Qty / Stock" value={form.qty} onChange={(e) => setForm((f) => ({ ...f, qty: Number(e.target.value), base_stock: Number(e.target.value) }))} />
 
         <div className="md:col-span-2 rounded-md border border-uiBorder p-3">
           <p className="mb-2 text-sm font-semibold">Foto del producto</p>
@@ -408,11 +436,12 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <input className="rounded-md border border-uiBorder p-2 text-sm" placeholder="Buscar por item#, nombre o descripción" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <select className="rounded-md border border-uiBorder p-2 text-sm" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value as "all" | "active" | "inactive") }>
+        <input className="rounded-md border border-uiBorder p-2 text-sm" placeholder="Buscar por item#, nombre, descripción o category" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <select className="rounded-md border border-uiBorder p-2 text-sm" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value as "all" | "active" | "inactive" | "featured") }>
           <option value="all">Todos</option>
           <option value="active">Activos</option>
           <option value="inactive">Inactivos</option>
+          <option value="featured">Featured</option>
         </select>
       </div>
 
@@ -428,25 +457,29 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
               <th className="px-3 py-2">Seller Category</th>
               <th className="px-3 py-2">Category</th>
               <th className="px-3 py-2">Condition</th>
+              <th className="px-3 py-2">Activo</th>
+              <th className="px-3 py-2">Featured</th>
               <th className="px-3 py-2">Acciones</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-mutedText" colSpan={9}>No hay productos para mostrar</td>
+                <td className="px-3 py-8 text-center text-mutedText" colSpan={11}>No hay productos para mostrar</td>
               </tr>
             ) : (
               filtered.map((p) => (
                 <tr key={p.id} className="border-t border-uiBorder">
                   <td className="px-3 py-2">{p.image_url ? <img src={p.image_url} alt={p.name} className="h-10 w-10 rounded object-cover border border-uiBorder" /> : <span className="text-xs text-mutedText">Sin foto</span>}</td>
-                  <td className="px-3 py-2">{p.sku ?? "—"}</td>
+                  <td className="px-3 py-2">{p.item_number ?? p.sku ?? "—"}</td>
                   <td className="px-3 py-2">{p.department ?? "—"}</td>
                   <td className="px-3 py-2 font-medium">{p.item_description || p.name}</td>
-                  <td className="px-3 py-2">{p.base_stock}</td>
+                  <td className="px-3 py-2">{p.qty ?? p.base_stock}</td>
                   <td className="px-3 py-2">{p.seller_category ?? "—"}</td>
-                  <td className="px-3 py-2">{p.category?.name ?? "—"}</td>
-                  <td className="px-3 py-2">{p.item_condition ?? "—"}</td>
+                  <td className="px-3 py-2">{p.category ?? p.category_ref?.name ?? "—"}</td>
+                  <td className="px-3 py-2">{p.condition ?? p.item_condition ?? "—"}</td>
+                  <td className="px-3 py-2">{p.active ? "Sí" : "No"}</td>
+                  <td className="px-3 py-2">{p.featured ? "Sí" : "No"}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <button className="rounded border border-uiBorder px-2 py-1 text-xs" type="button" onClick={() => startEdit(p)}>Editar</button>
