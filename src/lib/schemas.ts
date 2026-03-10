@@ -31,7 +31,6 @@ export const adminProductSchema = z.object({
   item_description: z.string().nullable().optional(),
   seller_category: z.string().nullable().optional(),
   category: z.string().nullable().optional(),
-  item_condition: z.string().nullable().optional(),
   condition: z.string().nullable().optional(),
   image_url: z.string().url().nullable().optional(),
   active: z.boolean().default(true),

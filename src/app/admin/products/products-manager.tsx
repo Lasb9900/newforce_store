@@ -23,7 +23,6 @@ type ProductRow = {
   seller_category: string | null;
   category: string | null;
   condition?: string | null;
-  item_condition: string | null;
   base_price_cents: number | null;
   price_cents?: number | null;
   base_stock: number;
@@ -39,8 +38,6 @@ type ProductRow = {
 type ProductForm = {
   name: string;
   description: string;
-  base_price_cents: number | null;
-  base_stock: number;
   active: boolean;
   featured: boolean;
   featured_rank: number;
@@ -51,7 +48,6 @@ type ProductForm = {
   item_description: string;
   seller_category: string;
   category: string;
-  item_condition: string;
   condition: string;
   price_cents: number | null;
   qty: number;
@@ -61,8 +57,6 @@ type ProductForm = {
 const EMPTY_FORM: ProductForm = {
   name: "",
   description: "",
-  base_price_cents: null,
-  base_stock: 0,
   active: true,
   featured: false,
   featured_rank: 0,
@@ -73,7 +67,6 @@ const EMPTY_FORM: ProductForm = {
   item_description: "",
   seller_category: "",
   category: "",
-  item_condition: "",
   condition: "",
   price_cents: null,
   qty: 0,
@@ -143,8 +136,6 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     setForm({
       name: product.name,
       description: "",
-      base_price_cents: product.base_price_cents,
-      base_stock: product.base_stock,
       active: product.active,
       featured: product.featured,
       featured_rank: 0,
@@ -155,10 +146,9 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       item_description: product.item_description ?? "",
       seller_category: product.seller_category ?? "",
       category: product.category ?? product.category_ref?.name ?? "",
-      item_condition: product.item_condition ?? "",
-      condition: product.condition ?? product.item_condition ?? "",
-      price_cents: product.price_cents ?? product.base_price_cents,
-      qty: product.qty ?? product.base_stock,
+      condition: product.condition ?? "",
+      price_cents: product.price_cents ?? product.base_price_cents ?? null,
+      qty: product.qty ?? product.base_stock ?? 0,
       tags: [],
     });
     setMessage(null);
@@ -197,12 +187,12 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       return;
     }
 
-    if (form.base_price_cents != null && form.base_price_cents < 0) {
+    if (form.price_cents != null && form.price_cents < 0) {
       setError("El precio debe ser >= 0");
       return;
     }
 
-    if (form.base_stock < 0) {
+    if (form.qty < 0) {
       setError("El stock debe ser >= 0");
       return;
     }
@@ -216,10 +206,11 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       item_description: form.item_description || null,
       seller_category: form.seller_category || null,
       category: form.category || null,
-      item_condition: form.item_condition || form.condition || null,
-      condition: form.condition || form.item_condition || null,
-      price_cents: form.price_cents ?? form.base_price_cents ?? null,
-      qty: form.qty ?? form.base_stock,
+      condition: form.condition || null,
+      price_cents: form.price_cents ?? null,
+      qty: form.qty,
+      base_price_cents: form.price_cents ?? null,
+      base_stock: form.qty,
     };
 
     const endpoint = editingId ? `/api/admin/products/${editingId}` : "/api/admin/products";
@@ -360,11 +351,10 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         <input className="rounded-md border border-uiBorder p-2.5" placeholder="Department" value={form.department} onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))} />
         <input className="rounded-md border border-uiBorder p-2.5" placeholder="Seller Category" value={form.seller_category} onChange={(e) => setForm((f) => ({ ...f, seller_category: e.target.value }))} />
         <input className="rounded-md border border-uiBorder p-2.5" placeholder="Category" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Condition" value={form.condition} onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value, item_condition: e.target.value }))} />
+        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Condition" value={form.condition} onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value }))} />
         <input className="rounded-md border border-uiBorder p-2.5" placeholder="Descripción extendida" value={form.item_description} onChange={(e) => setForm((f) => ({ ...f, item_description: e.target.value }))} />
-        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Precio (cents)" value={form.base_price_cents ?? ""} onChange={(e) => setForm((f) => ({ ...f, base_price_cents: e.target.value === "" ? null : Number(e.target.value) }))} />
-        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Precio compat (price_cents)" value={form.price_cents ?? ""} onChange={(e) => setForm((f) => ({ ...f, price_cents: e.target.value === "" ? null : Number(e.target.value) }))} />
-        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Qty / Stock" value={form.qty} onChange={(e) => setForm((f) => ({ ...f, qty: Number(e.target.value), base_stock: Number(e.target.value) }))} />
+        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Price (cents)" value={form.price_cents ?? ""} onChange={(e) => setForm((f) => ({ ...f, price_cents: e.target.value === "" ? null : Number(e.target.value) }))} />
+        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Qty" value={form.qty} onChange={(e) => setForm((f) => ({ ...f, qty: Number(e.target.value) }))} />
 
         <div className="md:col-span-2 rounded-md border border-uiBorder p-3">
           <p className="mb-2 text-sm font-semibold">Foto del producto</p>
@@ -477,7 +467,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
                   <td className="px-3 py-2">{p.qty ?? p.base_stock}</td>
                   <td className="px-3 py-2">{p.seller_category ?? "—"}</td>
                   <td className="px-3 py-2">{p.category ?? p.category_ref?.name ?? "—"}</td>
-                  <td className="px-3 py-2">{p.condition ?? p.item_condition ?? "—"}</td>
+                  <td className="px-3 py-2">{p.condition ?? "—"}</td>
                   <td className="px-3 py-2">{p.active ? "Sí" : "No"}</td>
                   <td className="px-3 py-2">{p.featured ? "Sí" : "No"}</td>
                   <td className="px-3 py-2">

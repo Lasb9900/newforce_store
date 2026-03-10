@@ -19,7 +19,6 @@ export type Product = {
   department: string | null;
   item_description: string | null;
   seller_category: string | null;
-  item_condition: string | null;
   condition: string | null;
   qty: number;
   image_url: string | null;

@@ -72,7 +72,6 @@ export async function POST(req: Request) {
       department: row.department || null,
       seller_category: row.sellerCategory || null,
       category: row.category || null,
-      item_condition: row.condition || null,
       condition: row.condition || null,
       category_id: categoryId,
       base_stock: Math.max(0, Math.round(row.qty)),
