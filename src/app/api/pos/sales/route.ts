@@ -4,6 +4,18 @@ import { requireSellerApi } from "@/lib/auth";
 import { getServiceSupabase } from "@/lib/supabase";
 
 const VALID_PAYMENT_METHODS = new Set(["cash", "card", "transfer"]);
+const BUSINESS_ERROR_CODES = new Set([
+  "INVALID_QTY",
+  "INVALID_PAYMENT_METHOD",
+  "PAYMENT_REFERENCE_REQUIRED",
+  "PRODUCT_NOT_FOUND",
+  "PRODUCT_INACTIVE",
+  "INVALID_PRICE",
+  "STOCK_INSUFFICIENT",
+  "SALE_INSERT_FAILED",
+  "SALE_ITEM_INSERT_FAILED",
+  "INVENTORY_UPDATE_FAILED",
+]);
 
 function logInfo(step: string, payload?: Record<string, unknown>) {
   console.info(`[POS_SALE] ${step}`, payload ?? {});
@@ -11,6 +23,29 @@ function logInfo(step: string, payload?: Record<string, unknown>) {
 
 function logError(step: string, payload?: Record<string, unknown>) {
   console.error(`[POS_SALE][ERROR] ${step}`, payload ?? {});
+}
+
+function getClientMessage(codeOrMessage: string) {
+  switch (codeOrMessage) {
+    case "INVALID_QTY":
+      return "Cantidad inválida";
+    case "INVALID_PAYMENT_METHOD":
+      return "Método de pago inválido";
+    case "PAYMENT_REFERENCE_REQUIRED":
+      return "La referencia de pago es obligatoria para tarjeta y transferencia";
+    case "PRODUCT_NOT_FOUND":
+      return "Producto no encontrado";
+    case "PRODUCT_INACTIVE":
+      return "Producto inactivo";
+    case "INVALID_PRICE":
+      return "El producto tiene un precio inválido";
+    case "STOCK_INSUFFICIENT":
+      return "Stock insuficiente";
+    case "INVENTORY_UPDATE_FAILED":
+      return "No se pudo actualizar inventario de forma segura";
+    default:
+      return "No se pudo registrar la venta";
+  }
 }
 
 export async function POST(req: Request) {
@@ -26,7 +61,7 @@ export async function POST(req: Request) {
   const parsed = createPosSaleSchema.safeParse(requestBody);
   if (!parsed.success) {
     logError("Invalid payload", { issues: parsed.error.issues });
-    return NextResponse.json({ error: "Payload inválido", details: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json({ error: "Payload inválido", details: parsed.error.flatten(), code: "INVALID_PAYLOAD" }, { status: 400 });
   }
 
   const paymentMethod = parsed.data.paymentMethod;
@@ -34,22 +69,22 @@ export async function POST(req: Request) {
 
   if (!VALID_PAYMENT_METHODS.has(paymentMethod)) {
     logError("Invalid payment method", { paymentMethod });
-    return NextResponse.json({ error: "Método de pago inválido" }, { status: 400 });
+    return NextResponse.json({ error: "Método de pago inválido", code: "INVALID_PAYMENT_METHOD" }, { status: 400 });
   }
 
   if ((paymentMethod === "transfer" || paymentMethod === "card") && !paymentReference) {
     logError("Missing required payment reference", { paymentMethod });
-    return NextResponse.json({ error: "La referencia de pago es obligatoria para tarjeta y transferencia" }, { status: 400 });
+    return NextResponse.json({ error: "La referencia de pago es obligatoria para tarjeta y transferencia", code: "PAYMENT_REFERENCE_REQUIRED" }, { status: 400 });
   }
 
   const item = parsed.data.items[0];
   if (!item?.productId) {
     logError("Missing product id in sale item");
-    return NextResponse.json({ error: "Producto no informado" }, { status: 400 });
+    return NextResponse.json({ error: "Producto no informado", code: "PRODUCT_ID_REQUIRED" }, { status: 400 });
   }
   if (!item?.qty || item.qty <= 0) {
     logError("Invalid quantity", { qty: item?.qty });
-    return NextResponse.json({ error: "Cantidad inválida" }, { status: 400 });
+    return NextResponse.json({ error: "Cantidad inválida", code: "INVALID_QTY" }, { status: 400 });
   }
 
   logInfo("Payload normalized", {
@@ -60,6 +95,30 @@ export async function POST(req: Request) {
     hasPaymentReference: Boolean(paymentReference),
     hasCustomerEmail: Boolean(parsed.data.customerEmail),
   });
+
+  const { data: currentProduct, error: productReadError } = await auth.supabase
+    .from("products")
+    .select("id,qty,base_stock,active")
+    .eq("id", item.productId)
+    .maybeSingle();
+
+  if (productReadError) {
+    logError("Failed to read current product stock before RPC", { productReadError, productId: item.productId });
+  } else {
+    logInfo("Current DB stock snapshot", {
+      productId: item.productId,
+      qty: currentProduct?.qty,
+      baseStock: currentProduct?.base_stock,
+      operationalStock:
+        currentProduct
+          ? Math.min(
+              currentProduct.qty ?? Number.POSITIVE_INFINITY,
+              currentProduct.base_stock ?? Number.POSITIVE_INFINITY,
+            )
+          : null,
+      active: currentProduct?.active,
+    });
+  }
 
   let service: ReturnType<typeof getServiceSupabase> | null = null;
   try {
@@ -103,30 +162,50 @@ export async function POST(req: Request) {
     p_customer_id: customerId,
   });
 
-  if (error || !data?.[0]) {
-    const msg = error?.message || "No se pudo registrar la venta";
+  if (error) {
+    const code = error.message || "INTERNAL_POS_SALE_ERROR";
+    const status = BUSINESS_ERROR_CODES.has(code) ? 400 : 500;
+
     logError("RPC create_pos_sale failed", {
-      message: msg,
-      details: error?.details,
-      hint: error?.hint,
-      code: error?.code,
+      businessCode: code,
+      details: error.details,
+      hint: error.hint,
+      sqlState: error.code,
+      rpcResponseData: data,
     });
 
-    if (msg.includes("Could not find the function public.create_pos_sale")) {
+    if ((error.message || "").includes("Could not find the function public.create_pos_sale")) {
       return NextResponse.json(
         {
           error:
             "La función RPC create_pos_sale no está sincronizada en Supabase. Ejecuta las migraciones POS más recientes y recarga schema cache (notify pgrst, 'reload schema').",
-          details: msg,
+          code: "RPC_NOT_FOUND",
+          details: error.message,
         },
         { status: 500 },
       );
     }
 
-    const status = error?.code?.startsWith("22") || error?.code?.startsWith("23") || error?.code === "P0001" ? 400 : 500;
     return NextResponse.json(
-      { error: msg, details: error?.details, hint: error?.hint, code: error?.code },
+      {
+        error: getClientMessage(code),
+        code,
+        details: error.details,
+        hint: error.hint,
+        sqlState: error.code,
+      },
       { status },
+    );
+  }
+
+  if (!data?.[0]) {
+    logError("RPC returned no error but empty data", { data });
+    return NextResponse.json(
+      {
+        error: "No se pudo registrar la venta: respuesta vacía del motor transaccional",
+        code: "EMPTY_RPC_RESPONSE",
+      },
+      { status: 500 },
     );
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type PosProduct = {
   id: string;
@@ -36,6 +37,7 @@ function formatCurrency(cents: number | null) {
 }
 
 export default function PosForm({ products }: { products: PosProduct[] }) {
+  const router = useRouter();
   const [localProducts, setLocalProducts] = useState(products);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(products[0]?.id ?? "");
@@ -106,7 +108,14 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "No se pudo registrar la venta");
+        const baseError = data.error || "No se pudo registrar la venta";
+        const enriched = [baseError, data.code ? `(${data.code})` : null, data.hint ? `Hint: ${data.hint}` : null]
+          .filter(Boolean)
+          .join(" ");
+        setError(enriched);
+        if (data.code === "STOCK_INSUFFICIENT") {
+          router.refresh();
+        }
         return;
       }
 
@@ -124,6 +133,7 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
       setQty(1);
       setCustomerEmail("");
       setPaymentReference("");
+      router.refresh();
     } finally {
       setSaving(false);
     }

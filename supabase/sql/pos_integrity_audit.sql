@@ -28,3 +28,20 @@ select ps.id, ps.order_id, ps.created_at, ps.product_id, ps.total
 from public.pos_sales ps
 left join public.orders o on o.id = ps.order_id
 where ps.order_id is not null and o.id is null;
+
+-- 4) Orders whose sum(order_items) does not match order total.
+select o.id as order_id,
+       o.total_cents as order_total_cents,
+       coalesce(sum(oi.line_total_cents), 0) as item_total_cents
+from public.orders o
+left join public.order_items oi on oi.order_id = o.id
+where o.channel = 'physical_store'
+  and o.status = 'paid'
+  and o.payment_status = 'paid'
+group by o.id, o.total_cents
+having coalesce(sum(oi.line_total_cents), 0) <> o.total_cents;
+
+-- 5) Product stock column divergence (can cause UI vs RPC mismatch if not normalized)
+select id, name, qty, base_stock
+from public.products
+where qty is distinct from base_stock;
