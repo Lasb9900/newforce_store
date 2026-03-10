@@ -106,7 +106,7 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
         qty,
         paymentMethod,
         totalCents: data.totalCents,
-        createdAt: new Date().toISOString(),
+        createdAt: data.createdAt ?? new Date().toISOString(),
       });
       setQty(1);
       setCustomerEmail("");
@@ -159,7 +159,10 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
 
       {selectedProduct ? (
         <div className="mt-3 rounded-md border border-uiBorder p-3 text-sm">
-          <p className="font-semibold">{selectedProduct.name}</p>
+          <div className="mb-2 flex items-center gap-3">
+            {selectedProduct.image_url ? <img src={selectedProduct.image_url} alt={selectedProduct.name} className="h-12 w-12 rounded object-cover border border-uiBorder" /> : null}
+            <p className="font-semibold">{selectedProduct.name}</p>
+          </div>
           <p>Item #: {selectedProduct.item_number ?? selectedProduct.sku ?? "—"}</p>
           <p>Categoría: {selectedProduct.category ?? "—"}</p>
           <p>Precio: {formatCurrency(selectedProduct.price_cents)}</p>
