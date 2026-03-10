@@ -73,6 +73,15 @@ export const createPosSaleSchema = z.object({
   items: z.array(posItemSchema).min(1),
 });
 
+export const createPosClosureSchema = z.object({
+  fromDate: z.string().datetime(),
+  toDate: z.string().datetime(),
+  actualCashCents: z.number().int().nonnegative(),
+  actualCardCents: z.number().int().nonnegative(),
+  actualTransferCents: z.number().int().nonnegative(),
+  notes: z.string().max(2000).optional(),
+});
+
 export const redeemPointsSchema = z.object({
   productId: z.string().uuid(),
   qty: z.number().int().positive().max(20),
