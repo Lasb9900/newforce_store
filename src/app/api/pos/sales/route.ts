@@ -61,7 +61,18 @@ export async function POST(req: Request) {
   });
 
   if (error || !data?.[0]) {
-    return NextResponse.json({ error: error?.message || "No se pudo registrar la venta" }, { status: 400 });
+    const msg = error?.message || "No se pudo registrar la venta";
+    if (msg.includes("Could not find the function public.create_pos_sale")) {
+      return NextResponse.json(
+        {
+          error:
+            "La función RPC create_pos_sale no está sincronizada en Supabase. Ejecuta las migraciones POS más recientes y recarga schema cache (notify pgrst, 'reload schema').",
+          details: msg,
+        },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 
   if (customerId && data[0].points_earned > 0 && service) {
