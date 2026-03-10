@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: closureError?.message || "No se pudo crear cierre" }, { status: 500 });
   }
 
-  const uniqueOrderIds = [...new Set((sales ?? []).map((s) => s.order_id))];
+  const uniqueOrderIds = [...new Set((sales ?? []).map((s) => s.order_id).filter((id): id is string => Boolean(id)))];
   if (uniqueOrderIds.length > 0) {
     const linkRows = uniqueOrderIds.map((saleOrderId) => ({ closure_id: closure.id, sale_order_id: saleOrderId }));
     const { error: linkErr } = await service.from("pos_cash_closure_sales").insert(linkRows);

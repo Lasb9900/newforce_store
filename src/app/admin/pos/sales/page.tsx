@@ -28,7 +28,7 @@ export default async function AdminPosSalesPage({
 
   let query = service
     .from("pos_sales")
-    .select("id,order_id,created_at,product_name,item_number,qty,price_cents,total_cents,payment_method,payment_reference,customer_email")
+    .select("id,order_id,created_at,product_name,item_number,qty,price_cents:price,total_cents:total,payment_method,payment_reference,customer_email")
     .gte("created_at", fromIso)
     .lte("created_at", toIso)
     .order("created_at", { ascending: false })

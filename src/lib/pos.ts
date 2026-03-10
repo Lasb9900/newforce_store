@@ -2,7 +2,7 @@ import "server-only";
 import { getServiceSupabase } from "@/lib/supabase";
 
 export type PosSaleRow = {
-  order_id: string;
+  order_id: string | null;
   created_at: string;
   product_name: string;
   item_number: string | null;
@@ -38,7 +38,7 @@ export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string)
   const service = getServiceSupabase();
   return service
     .from("pos_sales")
-    .select("order_id,created_at,product_name,item_number,qty,price_cents,total_cents,payment_method,payment_reference,customer_email")
+    .select("order_id,created_at,product_name,item_number,qty,price_cents:price,total_cents:total,payment_method,payment_reference,customer_email")
     .gte("created_at", fromDateIso)
     .lte("created_at", toDateIso)
     .order("created_at", { ascending: false });
