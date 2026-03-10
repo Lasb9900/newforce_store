@@ -15,10 +15,10 @@ export default async function AdminPosSalesPage({
   const service = getServiceSupabase();
 
   const now = new Date();
-  const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0);
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(now.getDate() - 7);
 
-  const from = typeof params.from === "string" ? params.from : todayStart.toISOString().slice(0, 10);
+  const from = typeof params.from === "string" ? params.from : sevenDaysAgo.toISOString().slice(0, 10);
   const to = typeof params.to === "string" ? params.to : now.toISOString().slice(0, 10);
   const paymentMethod = typeof params.paymentMethod === "string" ? params.paymentMethod : "";
   const product = typeof params.product === "string" ? params.product : "";

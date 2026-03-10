@@ -6,22 +6,13 @@ export default async function AdminDashboard() {
   const [{ data: kpi }, { data: topProducts }, { data: channels }, { data: lowStock }] = await Promise.all([
     supabase.from("admin_sales_kpis").select("*").single(),
     supabase
-      .from("order_items")
-      .select("product_id,name_snapshot,qty,line_total_cents")
-      .order("qty", { ascending: false })
+      .from("admin_top_products")
+      .select("product_id,product_name,units_sold,revenue_cents,online_units,physical_units")
+      .order("units_sold", { ascending: false })
       .limit(10),
     supabase.from("orders").select("channel,total_cents").eq("status", "paid").eq("payment_status", "paid"),
     supabase.from("products").select("id,name,base_stock").lte("base_stock", 5).limit(8),
   ]);
-
-  const topByUnits = new Map<string, { name: string; units: number; revenue: number }>();
-  for (const row of topProducts ?? []) {
-    const current = topByUnits.get(row.product_id) ?? { name: row.name_snapshot, units: 0, revenue: 0 };
-    current.units += row.qty;
-    current.revenue += row.line_total_cents ?? 0;
-    topByUnits.set(row.product_id, current);
-  }
-  const ranked = [...topByUnits.values()].sort((a, b) => b.units - a.units).slice(0, 10);
 
   const onlineRevenue = channels?.filter((c) => c.channel === "online").reduce((sum, c) => sum + c.total_cents, 0) ?? 0;
   const physicalRevenue = channels?.filter((c) => c.channel === "physical_store").reduce((sum, c) => sum + c.total_cents, 0) ?? 0;
@@ -47,12 +38,12 @@ export default async function AdminDashboard() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <article className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm">
-          <h2 className="mb-2 text-lg font-bold">Top productos</h2>
+          <h2 className="mb-2 text-lg font-bold">Top productos (online + POS)</h2>
           <ul className="space-y-2 text-sm">
-            {ranked.map((p) => (
-              <li key={p.name} className="rounded-md border border-uiBorder px-3 py-2">
-                <p className="font-medium">{p.name}</p>
-                <p className="text-mutedText">Unidades: {p.units} · Ingresos: ${(p.revenue / 100).toFixed(2)}</p>
+            {(topProducts ?? []).map((p) => (
+              <li key={p.product_id} className="rounded-md border border-uiBorder px-3 py-2">
+                <p className="font-medium">{p.product_name}</p>
+                <p className="text-mutedText">Unidades: {p.units_sold} (Online {p.online_units} · POS {p.physical_units}) · Ingresos: ${((p.revenue_cents ?? 0) / 100).toFixed(2)}</p>
               </li>
             ))}
           </ul>
