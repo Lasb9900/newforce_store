@@ -20,8 +20,18 @@ export async function POST(req: Request) {
   }
 
   const paymentMethod = parsed.data.paymentMethod;
+  const paymentReference = parsed.data.paymentReference?.trim() || null;
+
   if (!VALID_PAYMENT_METHODS.has(paymentMethod)) {
     return NextResponse.json({ error: "Método de pago inválido" }, { status: 400 });
+  }
+
+  if (paymentMethod === "transfer" && !paymentReference) {
+    return NextResponse.json({ error: "Debe ingresar la referencia de la transferencia" }, { status: 400 });
+  }
+
+  if (paymentMethod === "card" && !paymentReference) {
+    return NextResponse.json({ error: "Debe ingresar la referencia del pago con tarjeta" }, { status: 400 });
   }
 
   if (paymentMethod !== "cash" && !env.STRIPE_SECRET_KEY) {
@@ -32,8 +42,6 @@ export async function POST(req: Request) {
   if (!item?.productId) return NextResponse.json({ error: "Producto no informado" }, { status: 400 });
   if (!item?.qty || item.qty <= 0) return NextResponse.json({ error: "Cantidad inválida" }, { status: 400 });
 
-  // Use authenticated client as default to avoid service-key misconfiguration blocking cash sales.
-  // Service client is best-effort only for customer email lookup and points RPC.
   const db = auth.supabase;
   let service: ReturnType<typeof getServiceSupabase> | null = null;
   try {
@@ -99,6 +107,7 @@ export async function POST(req: Request) {
       status: "paid",
       payment_status: "paid",
       payment_method: paymentMethod,
+      payment_reference: paymentReference,
       subtotal_cents: totalCents,
       total_cents: totalCents,
       currency: "USD",
@@ -148,5 +157,6 @@ export async function POST(req: Request) {
     pointsEarned,
     totalCents,
     createdAt: order.created_at,
+    paymentReference,
   });
 }

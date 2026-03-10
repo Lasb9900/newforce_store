@@ -19,6 +19,7 @@ type SaleResult = {
   productName: string;
   qty: number;
   paymentMethod: string;
+  paymentReference: string | null;
   totalCents: number;
   createdAt: string;
 };
@@ -40,10 +41,13 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
   const [qty, setQty] = useState(1);
   const [customerEmail, setCustomerEmail] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<(typeof PAYMENT_METHODS)[number]["value"]>("cash");
+  const [paymentReference, setPaymentReference] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [lastSale, setLastSale] = useState<SaleResult | null>(null);
+
+  const requiresReference = paymentMethod === "transfer" || paymentMethod === "card";
 
   const filteredProducts = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -81,6 +85,11 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
       return;
     }
 
+    if (requiresReference && !paymentReference.trim()) {
+      setError("La referencia de pago es obligatoria para este método de pago");
+      return;
+    }
+
     setSaving(true);
     try {
       const res = await fetch("/api/pos/sales", {
@@ -89,6 +98,7 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
         body: JSON.stringify({
           customerEmail: customerEmail.trim() || undefined,
           paymentMethod,
+          paymentReference: paymentReference.trim() || undefined,
           items: [{ productId: selected, qty }],
         }),
       });
@@ -105,11 +115,13 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
         productName: selectedProduct?.name ?? "Producto",
         qty,
         paymentMethod,
+        paymentReference: data.paymentReference ?? (paymentReference.trim() || null),
         totalCents: data.totalCents,
         createdAt: data.createdAt ?? new Date().toISOString(),
       });
       setQty(1);
       setCustomerEmail("");
+      setPaymentReference("");
     } finally {
       setSaving(false);
     }
@@ -146,7 +158,15 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
           onChange={(e) => setQty(Number(e.target.value))}
         />
 
-        <select className="rounded-md border border-uiBorder p-2" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as "cash" | "card" | "transfer")}>
+        <select
+          className="rounded-md border border-uiBorder p-2"
+          value={paymentMethod}
+          onChange={(e) => {
+            const next = e.target.value as "cash" | "card" | "transfer";
+            setPaymentMethod(next);
+            if (next === "cash") setPaymentReference("");
+          }}
+        >
           {PAYMENT_METHODS.map((method) => (
             <option key={method.value} value={method.value}>
               {method.label}
@@ -154,7 +174,22 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
           ))}
         </select>
 
-        <input className="rounded-md border border-uiBorder p-2 md:col-span-2" placeholder="Email cliente (opcional)" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} />
+        {requiresReference ? (
+          <input
+            className="rounded-md border border-uiBorder p-2 md:col-span-2"
+            placeholder="Referencia de pago / Número de referencia"
+            value={paymentReference}
+            onChange={(e) => setPaymentReference(e.target.value)}
+            required
+          />
+        ) : null}
+
+        <input
+          className="rounded-md border border-uiBorder p-2 md:col-span-2"
+          placeholder="Email cliente (opcional)"
+          value={customerEmail}
+          onChange={(e) => setCustomerEmail(e.target.value)}
+        />
       </div>
 
       {selectedProduct ? (
@@ -184,6 +219,7 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
           <p>Producto: {lastSale.productName}</p>
           <p>Cantidad: {lastSale.qty}</p>
           <p>Método de pago: {lastSale.paymentMethod}</p>
+          <p>Referencia: {lastSale.paymentReference ?? "—"}</p>
           <p>Total: {formatCurrency(lastSale.totalCents)}</p>
         </div>
       ) : null}
