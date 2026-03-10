@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireCustomerPage } from "@/lib/auth";
-import PosForm from "./pos-form";
+import PosForm from "./PosForm";
 
 export default async function PosPage() {
   const { supabase, profile } = await requireCustomerPage("/login?next=/pos");
