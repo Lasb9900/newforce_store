@@ -23,6 +23,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <Link href="/admin/orders" className="block rounded px-2 py-2 hover:bg-white/10">Órdenes</Link>
             <Link href="/admin/reviews" className="block rounded px-2 py-2 hover:bg-white/10">Reviews</Link>
             <Link href="/pos" className="block rounded px-2 py-2 hover:bg-white/10">POS / Tienda física</Link>
+            <Link href="/admin/pos/sales" className="block rounded px-2 py-2 hover:bg-white/10">POS · Ventas</Link>
+            <Link href="/admin/pos/closure" className="block rounded px-2 py-2 hover:bg-white/10">POS · Cierre de caja</Link>
+            <Link href="/admin/pos/closures" className="block rounded px-2 py-2 hover:bg-white/10">POS · Historial cierres</Link>
             <Link href="/account" className="block rounded px-2 py-2 hover:bg-white/10">Cuenta cliente</Link>
           </nav>
         </aside>
