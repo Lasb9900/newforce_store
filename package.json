@@ -7,7 +7,10 @@
     "build": "cross-env NEXT_FONT_GOOGLE_MOCKED_RESPONSES=./src/lib/fonts/google-font-mocks.js next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "clean": "node -e \"try{require('fs').rmSync('.next',{ recursive: true, force: true })}catch{}\"",
+    "predev": "npm run clean",
+    "prebuild": "npm run clean"
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
