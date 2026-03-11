@@ -35,6 +35,12 @@ export default async function AdminDashboard() {
     physicalUnits: Number(row.physical_units ?? 0),
   }));
 
+  if (ranked.length) {
+    const topTotalRevenue = ranked.reduce((sum, row) => sum + row.revenue, 0);
+    totalRevenue = topTotalRevenue;
+    physicalRevenue = Math.max(topTotalRevenue - onlineRevenue, 0);
+  }
+
   if (!topRows) {
     const [{ data: paidOrders }, { data: orderItems }, { data: posRows }] = await Promise.all([
       supabase.from("orders").select("id,total_cents,channel,status,payment_status").eq("status", "paid").eq("payment_status", "paid"),
