@@ -34,7 +34,7 @@ export function sumPosTotals(rows: PosSaleRow[]): PosTotals {
   );
 }
 
-export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string, paymentMethod?: string, productQuery?: string) {
+export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string, paymentMethod?: string, productQuery?: string, orderIdQuery?: string) {
   const service = await getServerSupabase();
 
   const { data: ordersWithRef, error: errorWithRef } = await service
@@ -88,6 +88,7 @@ export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string,
   const filtered = rows.filter((row) => {
     if (paymentMethod && row.payment_method !== paymentMethod) return false;
     if (productQuery && !row.product_name.toLowerCase().includes(productQuery.toLowerCase())) return false;
+    if (orderIdQuery && !row.order_id.toLowerCase().includes(orderIdQuery.toLowerCase())) return false;
     return true;
   });
 

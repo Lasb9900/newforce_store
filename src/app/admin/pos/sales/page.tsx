@@ -21,16 +21,17 @@ export default async function AdminPosSalesPage({
   const to = typeof params.to === "string" ? params.to : now.toISOString().slice(0, 10);
   const paymentMethod = typeof params.paymentMethod === "string" ? params.paymentMethod : "";
   const product = typeof params.product === "string" ? params.product : "";
+  const orderId = typeof params.orderId === "string" ? params.orderId : "";
 
   const fromIso = new Date(`${from}T00:00:00.000Z`).toISOString();
   const toIso = new Date(`${to}T23:59:59.999Z`).toISOString();
 
-  const { data: sales, error } = await fetchPosSalesRange(fromIso, toIso, paymentMethod || undefined, product || undefined);
+  const { data: sales, error } = await fetchPosSalesRange(fromIso, toIso, paymentMethod || undefined, product || undefined, orderId || undefined);
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Ventas POS</h1>
-      <form className="grid gap-2 rounded-xl border border-uiBorder bg-surface p-4 md:grid-cols-5">
+      <form className="grid gap-2 rounded-xl border border-uiBorder bg-surface p-4 md:grid-cols-6">
         <input type="date" name="from" defaultValue={from} className="rounded border border-uiBorder p-2" />
         <input type="date" name="to" defaultValue={to} className="rounded border border-uiBorder p-2" />
         <select name="paymentMethod" defaultValue={paymentMethod} className="rounded border border-uiBorder p-2">
@@ -40,6 +41,7 @@ export default async function AdminPosSalesPage({
           <option value="transfer">Transferencia</option>
         </select>
         <input type="text" name="product" defaultValue={product} placeholder="Producto" className="rounded border border-uiBorder p-2" />
+        <input type="text" name="orderId" defaultValue={orderId} placeholder="Order ID / Sale ID" className="rounded border border-uiBorder p-2" />
         <button className="btn-primary" type="submit">Filtrar</button>
       </form>
 
@@ -51,13 +53,14 @@ export default async function AdminPosSalesPage({
           <table className="min-w-full text-sm">
             <thead className="bg-surfaceMuted text-left">
               <tr>
-                <th className="p-2">Fecha</th><th className="p-2">Producto</th><th className="p-2">Item #</th><th className="p-2">Cantidad</th><th className="p-2">Precio</th><th className="p-2">Total</th><th className="p-2">Método</th><th className="p-2">Referencia</th><th className="p-2">Email</th>
+                <th className="p-2">Fecha</th><th className="p-2">Order ID</th><th className="p-2">Producto</th><th className="p-2">Item #</th><th className="p-2">Cantidad</th><th className="p-2">Precio</th><th className="p-2">Total</th><th className="p-2">Método</th><th className="p-2">Referencia</th><th className="p-2">Email</th>
               </tr>
             </thead>
             <tbody>
               {sales.map((s) => (
                 <tr key={`${s.order_id}-${s.product_name}-${s.created_at}`} className="border-t border-uiBorder">
                   <td className="p-2">{new Date(s.created_at).toLocaleString()}</td>
+                  <td className="p-2 font-mono text-xs">{s.order_id}</td>
                   <td className="p-2">{s.product_name}</td>
                   <td className="p-2">{s.item_number ?? "—"}</td>
                   <td className="p-2">{s.qty}</td>

@@ -234,7 +234,7 @@ export async function POST(req: Request) {
 
   const { data: currentProduct, error: productReadError } = await auth.supabase
     .from("products")
-    .select("id,qty,base_stock,active")
+    .select("id,name,qty,base_stock,active")
     .eq("id", item.productId)
     .maybeSingle();
 
@@ -382,6 +382,8 @@ export async function POST(req: Request) {
       success: true,
       saleId: normalized.saleId,
       orderId: normalized.orderId,
+      productId: item.productId,
+      productName: currentProduct?.name ?? null,
       pointsEarned: normalized.pointsEarned,
       totalCents: normalized.totalCents,
       createdAt: normalized.createdAt,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type PosProduct = {
@@ -17,6 +17,7 @@ type PosProduct = {
 
 type SaleResult = {
   orderId: string;
+  productId: string;
   productName: string;
   qty: number;
   paymentMethod: string;
@@ -63,6 +64,13 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
     );
   }, [localProducts, query]);
 
+  useEffect(() => {
+    if (!filteredProducts.length) return;
+    if (!filteredProducts.some((p) => p.id === selected)) {
+      setSelected(filteredProducts[0].id);
+    }
+  }, [filteredProducts, selected]);
+
   const selectedProduct = useMemo(
     () => localProducts.find((p) => p.id === selected) ?? null,
     [localProducts, selected],
@@ -73,7 +81,9 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
     setError(null);
     setMessage(null);
 
-    if (!selected) {
+    const selectedId = selectedProduct?.id ?? selected;
+
+    if (!selectedId) {
       setError("Debes seleccionar un producto");
       return;
     }
@@ -102,7 +112,7 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
           customerEmail: customerEmail.trim() || undefined,
           paymentMethod,
           paymentReference: paymentReference.trim() || undefined,
-          items: [{ productId: selected, qty }],
+          items: [{ productId: selectedId, qty }],
         }),
       });
       const data = await res.json();
@@ -122,14 +132,15 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
       setMessage(`Venta registrada: ${data.orderId ?? data.saleId}`);
       setLastSale({
         orderId: data.orderId ?? data.saleId ?? "N/A",
-        productName: selectedProduct?.name ?? "Producto",
+        productId: data.productId ?? selectedId,
+        productName: data.productName ?? selectedProduct?.name ?? "Producto",
         qty,
         paymentMethod,
         paymentReference: data.paymentReference ?? (paymentReference.trim() || null),
         totalCents: data.totalCents,
         createdAt: data.createdAt ?? new Date().toISOString(),
       });
-      setLocalProducts((prev) => prev.map((p) => (p.id === selected ? { ...p, qty: Math.max(0, p.qty - qty) } : p)));
+      setLocalProducts((prev) => prev.map((p) => (p.id === selectedId ? { ...p, qty: Math.max(0, p.qty - qty) } : p)));
       setQty(1);
       setCustomerEmail("");
       setPaymentReference("");
@@ -228,6 +239,7 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
         <div className="mt-3 rounded-md border border-uiBorder bg-surfaceMuted p-3 text-sm">
           <p className="font-semibold">Última venta registrada</p>
           <p>Orden: {lastSale.orderId}</p>
+          <p>Producto ID: {lastSale.productId}</p>
           <p>Producto: {lastSale.productName}</p>
           <p>Cantidad: {lastSale.qty}</p>
           <p>Método de pago: {PAYMENT_METHODS.find((m) => m.value === lastSale.paymentMethod)?.label ?? lastSale.paymentMethod}</p>
