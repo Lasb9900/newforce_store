@@ -1,35 +1,38 @@
 import { requireAdminPage } from "@/lib/auth";
 
+function toCents(value: unknown) {
+  const n = typeof value === "number" ? value : Number(value ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Number.isInteger(n) ? n : Math.round(n * 100);
+}
+
 export default async function AdminDashboard() {
   const { supabase } = await requireAdminPage();
 
-  const [{ data: topRows }, { data: lowStock }, { data: onlinePaidOrders }] = await Promise.all([
+  const [{ data: topRows }, { data: lowStock }, { data: onlineRows }, posResult] = await Promise.all([
     supabase.from("admin_top_products").select("product_id,product_name,units_sold,revenue_cents,online_units,physical_units").order("units_sold", { ascending: false }).limit(10),
     supabase.from("products").select("id,name,qty,base_stock").or("base_stock.lte.5,qty.lte.5").limit(20),
     supabase.from("orders").select("id,total_cents").eq("status", "paid").eq("payment_status", "paid").eq("channel", "online"),
+    supabase.from("pos_sales_report").select("row_id,order_id,total"),
   ]);
 
-  let onlineOrders = (onlinePaidOrders ?? []).length;
-  let onlineRevenue = (onlinePaidOrders ?? []).reduce((sum, row) => sum + Number(row.total_cents ?? 0), 0);
-
-  let posRows: Array<{ id: string; order_id?: string | null; total?: number | null; price?: number | null; qty?: number | null }> = [];
-  const withOrderId = await supabase.from("pos_sales").select("id,order_id,total,price,qty");
-  if (withOrderId.error?.message?.includes("column pos_sales.order_id does not exist")) {
-    const withoutOrderId = await supabase.from("pos_sales").select("id,total,price,qty");
-    posRows = (withoutOrderId.data ?? []).map((row) => ({ ...row, order_id: null }));
-  } else {
-    posRows = withOrderId.data ?? [];
-  }
-
-  let physicalRevenue = posRows.reduce((sum, row) => {
-    const lineTotal = Number(row.total ?? 0);
-    if (lineTotal > 0) return sum + lineTotal;
-    return sum + Number(row.price ?? 0) * Number(row.qty ?? 0);
-  }, 0);
-  let physicalOrders = new Set(posRows.map((row) => row.order_id ?? row.id)).size;
-
+  const posRows = posResult.data ?? [];
+  let onlineOrders = (onlineRows ?? []).length;
+  let onlineRevenue = (onlineRows ?? []).reduce((sum, row) => sum + toCents(row.total_cents), 0);
+  let physicalRevenue = posRows.reduce((sum, row) => sum + toCents(row.total), 0);
+  let physicalOrders = new Set(posRows.map((row) => row.order_id ?? row.row_id)).size;
   let totalRevenue = onlineRevenue + physicalRevenue;
   let paidOrdersCount = onlineOrders + physicalOrders;
+  let averageTicket = paidOrdersCount > 0 ? totalRevenue / paidOrdersCount : 0;
+
+  console.log("[ADMIN_KPI] onlineRows:", onlineRows?.length ?? 0);
+  console.log("[ADMIN_KPI] posRows:", posRows.length);
+  console.log("[ADMIN_KPI] onlineRevenue:", onlineRevenue);
+  console.log("[ADMIN_KPI] physicalRevenue:", physicalRevenue);
+  console.log("[ADMIN_KPI] onlineOrders:", onlineOrders);
+  console.log("[ADMIN_KPI] physicalOrders:", physicalOrders);
+  console.log("[ADMIN_KPI] totalRevenue:", totalRevenue);
+  console.log("[ADMIN_KPI] averageTicket:", averageTicket);
 
   let ranked = (topRows ?? []).map((row) => ({
     product_id: row.product_id,
@@ -55,6 +58,7 @@ export default async function AdminDashboard() {
     physicalRevenue = physical.reduce((sum, o) => sum + Number(o.total_cents ?? 0), 0);
     totalRevenue = onlineRevenue + physicalRevenue;
     paidOrdersCount = (paidOrders ?? []).length;
+    averageTicket = paidOrdersCount > 0 ? totalRevenue / paidOrdersCount : 0;
 
     const orderIds = new Set((paidOrders ?? []).map((o) => o.id));
     const topMap = new Map<string, { name: string; units: number; revenue: number; onlineUnits: number; physicalUnits: number }>();
@@ -93,7 +97,7 @@ export default async function AdminDashboard() {
         </article>
         <article className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm">
           <p className="text-sm text-mutedText">Ticket promedio</p>
-          <p className="text-3xl font-extrabold text-brand-ink">${((totalRevenue / Math.max(paidOrdersCount, 1)) / 100).toFixed(2)}</p>
+          <p className="text-3xl font-extrabold text-brand-ink">${(averageTicket / 100).toFixed(2)}</p>
         </article>
       </div>
 
