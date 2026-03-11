@@ -45,3 +45,12 @@ having coalesce(sum(oi.line_total_cents), 0) <> o.total_cents;
 select id, name, qty, base_stock
 from public.products
 where qty is distinct from base_stock;
+
+-- 6) Products sold in paid orders but missing from admin_top_products view.
+select distinct oi.product_id
+from public.order_items oi
+join public.orders o on o.id = oi.order_id
+left join public.admin_top_products atp on atp.product_id = oi.product_id
+where o.status = 'paid'
+  and o.payment_status = 'paid'
+  and atp.product_id is null;

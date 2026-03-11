@@ -11,7 +11,7 @@ export default async function AdminDashboard() {
       .order("units_sold", { ascending: false })
       .limit(10),
     supabase.from("orders").select("channel,total_cents").eq("status", "paid").eq("payment_status", "paid"),
-    supabase.from("products").select("id,name,base_stock").lte("base_stock", 5).limit(8),
+    supabase.from("products").select("id,name,qty,base_stock").or("base_stock.lte.5,qty.lte.5").limit(20),
   ]);
 
   const onlineRevenue = channels?.filter((c) => c.channel === "online").reduce((sum, c) => sum + c.total_cents, 0) ?? 0;
@@ -52,12 +52,20 @@ export default async function AdminDashboard() {
         <article className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm">
           <h2 className="mb-2 text-lg font-bold">Stock bajo</h2>
           <ul className="space-y-2 text-sm">
-            {(lowStock ?? []).map((p) => (
-              <li key={p.id} className="flex items-center justify-between rounded-md border border-uiBorder px-3 py-2">
-                <span>{p.name}</span>
-                <span className="rounded-full bg-brand-accent/10 px-2 py-1 text-xs font-semibold text-brand-accent">{p.base_stock}</span>
-              </li>
-            ))}
+            {(lowStock ?? [])
+              .map((p) => ({
+                ...p,
+                operationalStock: Math.min(p.qty ?? Number.POSITIVE_INFINITY, p.base_stock ?? Number.POSITIVE_INFINITY),
+              }))
+              .filter((p) => Number.isFinite(p.operationalStock) && p.operationalStock <= 5)
+              .sort((a, b) => a.operationalStock - b.operationalStock)
+              .slice(0, 8)
+              .map((p) => (
+                <li key={p.id} className="flex items-center justify-between rounded-md border border-uiBorder px-3 py-2">
+                  <span>{p.name}</span>
+                  <span className="rounded-full bg-brand-accent/10 px-2 py-1 text-xs font-semibold text-brand-accent">{p.operationalStock}</span>
+                </li>
+              ))}
           </ul>
         </article>
       </div>

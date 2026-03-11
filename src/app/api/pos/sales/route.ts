@@ -3,6 +3,24 @@ import { createPosSaleSchema } from "@/lib/schemas";
 import { requireSellerApi } from "@/lib/auth";
 import { getServiceSupabase } from "@/lib/supabase";
 
+type RpcArrayShape = {
+  order_id: string;
+  created_at: string;
+  total_cents: number;
+  points_earned: number;
+  payment_reference: string | null;
+};
+
+type RpcObjectShape = {
+  success?: boolean;
+  sale_id?: string;
+  order_id?: string;
+  created_at?: string;
+  total_cents?: number;
+  points_earned?: number;
+  payment_reference?: string | null;
+};
+
 const VALID_PAYMENT_METHODS = new Set(["cash", "card", "transfer"]);
 const BUSINESS_ERROR_CODES = new Set([
   "INVALID_QTY",
@@ -46,6 +64,68 @@ function getClientMessage(codeOrMessage: string) {
     default:
       return "No se pudo registrar la venta";
   }
+}
+
+async function normalizeRpcResult(
+  rawData: unknown,
+  supabase: unknown,
+) {
+  const db = supabase as {
+    from: (table: string) => {
+      select: (columns: string) => {
+        eq: (column: string, value: string) => {
+          maybeSingle: () => Promise<{
+            data: { id: string; created_at: string; total_cents: number; points_earned: number | null; payment_reference: string | null } | null;
+          }>;
+        };
+      };
+    };
+  };
+  const payload = rawData as RpcArrayShape[] | RpcObjectShape | null;
+
+  if (Array.isArray(payload) && payload[0]?.order_id) {
+    return {
+      orderId: payload[0].order_id,
+      createdAt: payload[0].created_at,
+      totalCents: payload[0].total_cents,
+      pointsEarned: payload[0].points_earned,
+      paymentReference: payload[0].payment_reference ?? null,
+    };
+  }
+
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const maybeOrderId = payload.order_id ?? payload.sale_id;
+
+    if (!maybeOrderId) return null;
+
+    if (payload.total_cents != null && payload.created_at) {
+      return {
+        orderId: maybeOrderId,
+        createdAt: payload.created_at,
+        totalCents: payload.total_cents,
+        pointsEarned: payload.points_earned ?? 0,
+        paymentReference: payload.payment_reference ?? null,
+      };
+    }
+
+    const { data: orderRow } = await db
+      .from("orders")
+      .select("id,created_at,total_cents,points_earned,payment_reference")
+      .eq("id", maybeOrderId)
+      .maybeSingle();
+
+    if (orderRow) {
+      return {
+        orderId: orderRow.id,
+        createdAt: orderRow.created_at,
+        totalCents: orderRow.total_cents,
+        pointsEarned: orderRow.points_earned ?? 0,
+        paymentReference: orderRow.payment_reference ?? null,
+      };
+    }
+  }
+
+  return null;
 }
 
 export async function POST(req: Request) {
@@ -198,35 +278,42 @@ export async function POST(req: Request) {
     );
   }
 
-  if (!data?.[0]) {
-    logError("RPC returned no error but empty data", { data });
+  logInfo("Raw RPC success payload", {
+    isArray: Array.isArray(data),
+    payloadKeys: data && typeof data === "object" ? Object.keys(data as Record<string, unknown>) : [],
+    data,
+  });
+
+  const normalized = await normalizeRpcResult(data, auth.supabase);
+  if (!normalized) {
+    logError("RPC returned no error but unsupported payload shape", { data });
     return NextResponse.json(
       {
-        error: "No se pudo registrar la venta: respuesta vacía del motor transaccional",
-        code: "EMPTY_RPC_RESPONSE",
+        error: "No se pudo registrar la venta: respuesta no reconocida del motor transaccional",
+        code: "UNSUPPORTED_RPC_RESPONSE",
       },
       { status: 500 },
     );
   }
 
   logInfo("Sale committed in DB transaction", {
-    orderId: data[0].order_id,
-    totalCents: data[0].total_cents,
-    pointsEarned: data[0].points_earned,
+    orderId: normalized.orderId,
+    totalCents: normalized.totalCents,
+    pointsEarned: normalized.pointsEarned,
   });
 
-  if (customerId && data[0].points_earned > 0 && service) {
+  if (customerId && normalized.pointsEarned > 0 && service) {
     const { error: pointsError } = await service.rpc("add_points", {
       p_user_id: customerId,
-      p_points: data[0].points_earned,
-      p_order_id: data[0].order_id,
-      p_description: `Puntos por venta física ${data[0].order_id}`,
+      p_points: normalized.pointsEarned,
+      p_order_id: normalized.orderId,
+      p_description: `Puntos por venta física ${normalized.orderId}`,
       p_created_by: auth.user.id,
     });
 
     if (pointsError) {
       logError("add_points RPC failed after sale commit", {
-        orderId: data[0].order_id,
+        orderId: normalized.orderId,
         customerId,
         pointsError,
       });
@@ -235,10 +322,10 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    orderId: data[0].order_id,
-    pointsEarned: data[0].points_earned,
-    totalCents: data[0].total_cents,
-    createdAt: data[0].created_at,
-    paymentReference: data[0].payment_reference,
+    orderId: normalized.orderId,
+    pointsEarned: normalized.pointsEarned,
+    totalCents: normalized.totalCents,
+    createdAt: normalized.createdAt,
+    paymentReference: normalized.paymentReference,
   });
 }
