@@ -3,18 +3,29 @@ import { requireAdminPage } from "@/lib/auth";
 export default async function AdminDashboard() {
   const { supabase } = await requireAdminPage();
 
-  const [{ data: kpis, error: kpisError }, { data: topRows, error: topError }, { data: lowStock }] = await Promise.all([
-    supabase.from("admin_sales_kpis").select("*").single(),
+  const [{ data: topRows }, { data: lowStock }, { data: onlinePaidOrders }] = await Promise.all([
     supabase.from("admin_top_products").select("product_id,product_name,units_sold,revenue_cents,online_units,physical_units").order("units_sold", { ascending: false }).limit(10),
     supabase.from("products").select("id,name,qty,base_stock").or("base_stock.lte.5,qty.lte.5").limit(20),
+    supabase.from("orders").select("id,total_cents").eq("status", "paid").eq("payment_status", "paid").eq("channel", "online"),
   ]);
 
-  let onlineOrders = Number(kpis?.online_orders ?? 0);
-  let physicalOrders = Number(kpis?.physical_orders ?? 0);
-  let onlineRevenue = Number(kpis?.online_revenue_cents ?? 0);
-  let physicalRevenue = Number(kpis?.physical_revenue_cents ?? 0);
-  let totalRevenue = Number(kpis?.total_revenue_cents ?? onlineRevenue + physicalRevenue);
-  let paidOrdersCount = Number(kpis?.paid_orders ?? onlineOrders + physicalOrders);
+  let onlineOrders = (onlinePaidOrders ?? []).length;
+  let onlineRevenue = (onlinePaidOrders ?? []).reduce((sum, row) => sum + Number(row.total_cents ?? 0), 0);
+
+  let posRows: Array<{ id: string; order_id?: string | null; total: number | null }> = [];
+  const withOrderId = await supabase.from("pos_sales").select("id,order_id,total");
+  if (withOrderId.error?.message?.includes("column pos_sales.order_id does not exist")) {
+    const withoutOrderId = await supabase.from("pos_sales").select("id,total");
+    posRows = (withoutOrderId.data ?? []).map((row) => ({ ...row, order_id: null }));
+  } else {
+    posRows = withOrderId.data ?? [];
+  }
+
+  let physicalRevenue = posRows.reduce((sum, row) => sum + Number(row.total ?? 0), 0);
+  let physicalOrders = new Set(posRows.map((row) => row.order_id ?? row.id)).size;
+  let totalRevenue = onlineRevenue + physicalRevenue;
+  let paidOrdersCount = onlineOrders + physicalOrders;
+
   let ranked = (topRows ?? []).map((row) => ({
     product_id: row.product_id,
     name: row.product_name,
@@ -24,7 +35,7 @@ export default async function AdminDashboard() {
     physicalUnits: Number(row.physical_units ?? 0),
   }));
 
-  if (kpisError || topError) {
+  if (!topRows) {
     const [{ data: paidOrders }, { data: orderItems }, { data: posRows }] = await Promise.all([
       supabase.from("orders").select("id,total_cents,channel,status,payment_status").eq("status", "paid").eq("payment_status", "paid"),
       supabase.from("order_items").select("order_id,product_id,name_snapshot,qty,line_total_cents"),
