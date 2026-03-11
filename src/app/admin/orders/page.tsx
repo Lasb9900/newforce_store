@@ -1,5 +1,4 @@
 import { requireOwnerPage } from "@/lib/auth";
-import { getServiceSupabase } from "@/lib/supabase";
 
 type AdminSaleRow = {
   id: string;
@@ -19,8 +18,7 @@ export default async function AdminOrders({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireOwnerPage();
-  const supabase = getServiceSupabase();
+  const { supabase } = await requireOwnerPage();
 
   const params = await searchParams;
   const channel = typeof params.channel === "string" ? params.channel : "";
