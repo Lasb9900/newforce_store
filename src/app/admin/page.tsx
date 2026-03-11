@@ -3,10 +3,11 @@ import { requireAdminPage } from "@/lib/auth";
 export default async function AdminDashboard() {
   const { supabase } = await requireAdminPage();
 
-  const [{ data: topRows }, { data: lowStock }, { data: onlinePaidOrders }] = await Promise.all([
+  const [{ data: topRows }, { data: lowStock }, { data: onlinePaidOrders }, { data: kpisView }] = await Promise.all([
     supabase.from("admin_top_products").select("product_id,product_name,units_sold,revenue_cents,online_units,physical_units").order("units_sold", { ascending: false }).limit(10),
     supabase.from("products").select("id,name,qty,base_stock").or("base_stock.lte.5,qty.lte.5").limit(20),
     supabase.from("orders").select("id,total_cents").eq("status", "paid").eq("payment_status", "paid").eq("channel", "online"),
+    supabase.from("admin_sales_kpis").select("online_revenue_cents,physical_revenue_cents,online_orders,physical_orders,paid_orders").single(),
   ]);
 
   let onlineOrders = (onlinePaidOrders ?? []).length;
@@ -23,8 +24,20 @@ export default async function AdminDashboard() {
 
   let physicalRevenue = posRows.reduce((sum, row) => sum + Number(row.total ?? 0), 0);
   let physicalOrders = new Set(posRows.map((row) => row.order_id ?? row.id)).size;
+
+  if (physicalRevenue === 0 && Number(kpisView?.physical_revenue_cents ?? 0) > 0) {
+    physicalRevenue = Number(kpisView?.physical_revenue_cents ?? 0);
+  }
+  if (physicalOrders === 0 && Number(kpisView?.physical_orders ?? 0) > 0) {
+    physicalOrders = Number(kpisView?.physical_orders ?? 0);
+  }
+
   let totalRevenue = onlineRevenue + physicalRevenue;
   let paidOrdersCount = onlineOrders + physicalOrders;
+
+  if (paidOrdersCount === 0 && Number(kpisView?.paid_orders ?? 0) > 0) {
+    paidOrdersCount = Number(kpisView?.paid_orders ?? 0);
+  }
 
   let ranked = (topRows ?? []).map((row) => ({
     product_id: row.product_id,
@@ -34,12 +47,6 @@ export default async function AdminDashboard() {
     onlineUnits: Number(row.online_units ?? 0),
     physicalUnits: Number(row.physical_units ?? 0),
   }));
-
-  if (ranked.length) {
-    const topTotalRevenue = ranked.reduce((sum, row) => sum + row.revenue, 0);
-    totalRevenue = topTotalRevenue;
-    physicalRevenue = Math.max(topTotalRevenue - onlineRevenue, 0);
-  }
 
   if (!topRows) {
     const [{ data: paidOrders }, { data: orderItems }, { data: posRows }] = await Promise.all([
