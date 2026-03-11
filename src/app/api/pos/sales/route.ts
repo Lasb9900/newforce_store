@@ -2,47 +2,301 @@ import { NextResponse } from "next/server";
 import { createPosSaleSchema } from "@/lib/schemas";
 import { requireSellerApi } from "@/lib/auth";
 import { getServiceSupabase } from "@/lib/supabase";
-import { env } from "@/lib/env";
+
+type RpcArrayShape = {
+  success?: boolean;
+  sale_id?: string;
+  order_id?: string;
+  created_at?: string;
+  total_cents?: number;
+  points_earned?: number;
+  payment_reference?: string | null;
+};
+
+type RpcObjectShape = RpcArrayShape;
+
+type NormalizedSaleResult = {
+  saleId: string;
+  orderId: string | null;
+  createdAt: string | null;
+  totalCents: number | null;
+  pointsEarned: number;
+  paymentReference: string | null;
+};
+
+async function resolveTotalCents(db: {
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (column: string, value: string) => {
+        maybeSingle: () => Promise<{ data: Record<string, unknown> | null }>;
+      };
+    };
+  };
+}, orderId: string | null): Promise<number | null> {
+  if (!orderId) return null;
+
+  const { data: order } = await db
+    .from("orders")
+    .select("total_cents")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  const total = Number((order?.total_cents as number | undefined) ?? 0);
+  if (Number.isFinite(total) && total > 0) return total;
+
+  const { data: lines } = await db
+    .from("order_items")
+    .select("line_total_cents,qty,unit_price_cents_snapshot")
+    .eq("order_id", orderId)
+    .maybeSingle();
+
+  const fallback =
+    Number((lines?.line_total_cents as number | undefined) ?? 0) ||
+    Number((lines?.unit_price_cents_snapshot as number | undefined) ?? 0) * Number((lines?.qty as number | undefined) ?? 0);
+  return Number.isFinite(fallback) ? fallback : null;
+}
 
 const VALID_PAYMENT_METHODS = new Set(["cash", "card", "transfer"]);
+const BUSINESS_ERROR_CODES = new Set([
+  "INVALID_QTY",
+  "INVALID_PAYMENT_METHOD",
+  "PAYMENT_REFERENCE_REQUIRED",
+  "PRODUCT_NOT_FOUND",
+  "PRODUCT_INACTIVE",
+  "INVALID_PRICE",
+  "STOCK_INSUFFICIENT",
+  "SALE_INSERT_FAILED",
+  "SALE_ITEM_INSERT_FAILED",
+  "INVENTORY_UPDATE_FAILED",
+]);
 
-function isInvalidApiKeyError(message: string | undefined) {
-  return (message ?? "").toLowerCase().includes("invalid api key");
+function logInfo(step: string, payload?: Record<string, unknown>) {
+  console.info(`[POS_SALE] ${step}`, payload ?? {});
+}
+
+function logError(step: string, payload?: Record<string, unknown>) {
+  console.error(`[POS_SALE][ERROR] ${step}`, payload ?? {});
+}
+
+function getClientMessage(codeOrMessage: string) {
+  switch (codeOrMessage) {
+    case "INVALID_QTY":
+      return "Cantidad inválida";
+    case "INVALID_PAYMENT_METHOD":
+      return "Método de pago inválido";
+    case "PAYMENT_REFERENCE_REQUIRED":
+      return "La referencia de pago es obligatoria para tarjeta y transferencia";
+    case "PRODUCT_NOT_FOUND":
+      return "Producto no encontrado";
+    case "PRODUCT_INACTIVE":
+      return "Producto inactivo";
+    case "INVALID_PRICE":
+      return "El producto tiene un precio inválido";
+    case "STOCK_INSUFFICIENT":
+      return "Stock insuficiente";
+    case "INVENTORY_UPDATE_FAILED":
+      return "No se pudo actualizar inventario de forma segura";
+    default:
+      return "No se pudo registrar la venta";
+  }
+}
+
+function pickRpcObject(rawData: unknown): RpcObjectShape | null {
+  if (Array.isArray(rawData)) {
+    const first = rawData[0] as RpcArrayShape | undefined;
+    if (!first || typeof first !== "object") return null;
+    return first;
+  }
+
+  if (rawData && typeof rawData === "object") {
+    return rawData as RpcObjectShape;
+  }
+
+  return null;
+}
+
+async function normalizeRpcResult(rawData: unknown, supabase: unknown): Promise<NormalizedSaleResult | null> {
+  const db = supabase as {
+    from: (table: string) => {
+      select: (columns: string) => {
+        eq: (column: string, value: string) => {
+          maybeSingle: () => Promise<{ data: Record<string, unknown> | null }>;
+        };
+      };
+    };
+  };
+
+  const payload = pickRpcObject(rawData);
+  if (!payload) return null;
+
+  const rpcSaysSuccess = payload.success === undefined || payload.success === true;
+  const candidateId = payload.order_id ?? payload.sale_id ?? null;
+
+  if (!rpcSaysSuccess || !candidateId) {
+    return null;
+  }
+
+  // Rich table-return shape (already includes totals)
+  if (payload.order_id && payload.created_at && payload.total_cents != null) {
+    return {
+      saleId: payload.sale_id ?? payload.order_id,
+      orderId: payload.order_id,
+      createdAt: payload.created_at,
+      totalCents: payload.total_cents,
+      pointsEarned: payload.points_earned ?? 0,
+      paymentReference: payload.payment_reference ?? null,
+    };
+  }
+
+  // Object shape may return sale_id that is actually orders.id OR pos_sales.id depending on DB function version.
+  const { data: orderById } = await db
+    .from("orders")
+    .select("id,created_at,total_cents,points_earned,payment_reference")
+    .eq("id", candidateId)
+    .maybeSingle();
+
+  if (orderById) {
+    return {
+      saleId: payload.sale_id ?? String(orderById.id),
+      orderId: String(orderById.id),
+      createdAt: String(orderById.created_at ?? ""),
+      totalCents: Number(orderById.total_cents ?? 0),
+      pointsEarned: Number(orderById.points_earned ?? 0),
+      paymentReference: (orderById.payment_reference as string | null) ?? null,
+    };
+  }
+
+  let { data: posSaleRow } = await db
+    .from("pos_sales")
+    .select("id,order_id,created_at,total,payment_reference")
+    .eq("id", candidateId)
+    .maybeSingle();
+
+  if (!posSaleRow) {
+    const { data: posSaleWithoutOrderId } = await db
+      .from("pos_sales")
+      .select("id,created_at,total,payment_reference")
+      .eq("id", candidateId)
+      .maybeSingle();
+    posSaleRow = posSaleWithoutOrderId;
+  }
+
+  if (posSaleRow) {
+    const orderId = (posSaleRow.order_id as string | null) ?? null;
+
+    if (orderId) {
+      const { data: orderByPosSale } = await db
+        .from("orders")
+        .select("id,created_at,total_cents,points_earned,payment_reference")
+        .eq("id", orderId)
+        .maybeSingle();
+
+      if (orderByPosSale) {
+        return {
+          saleId: String(posSaleRow.id),
+          orderId: String(orderByPosSale.id),
+          createdAt: String(orderByPosSale.created_at ?? ""),
+          totalCents: Number(orderByPosSale.total_cents ?? posSaleRow.total ?? 0),
+          pointsEarned: Number(orderByPosSale.points_earned ?? 0),
+          paymentReference: (orderByPosSale.payment_reference as string | null) ?? (posSaleRow.payment_reference as string | null) ?? null,
+        };
+      }
+    }
+
+    // We still return success to avoid false 500 + duplicate retries.
+    return {
+      saleId: String(posSaleRow.id),
+      orderId,
+      createdAt: String(posSaleRow.created_at ?? ""),
+      totalCents: Number(posSaleRow.total ?? 0),
+      pointsEarned: 0,
+      paymentReference: (posSaleRow.payment_reference as string | null) ?? null,
+    };
+  }
+
+  // Last-resort success normalization for legacy RPC object payload.
+  return {
+    saleId: candidateId,
+    orderId: payload.order_id ?? null,
+    createdAt: payload.created_at ?? null,
+    totalCents: payload.total_cents ?? null,
+    pointsEarned: payload.points_earned ?? 0,
+    paymentReference: payload.payment_reference ?? null,
+  };
 }
 
 export async function POST(req: Request) {
-  const auth = await requireSellerApi();
-  if ("error" in auth) return auth.error;
+  logInfo("Starting sale creation");
 
-  const parsed = createPosSaleSchema.safeParse(await req.json());
+  const auth = await requireSellerApi();
+  if ("error" in auth) {
+    logError("Unauthorized seller attempt");
+    return auth.error;
+  }
+
+  const requestBody = await req.json();
+  const parsed = createPosSaleSchema.safeParse(requestBody);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Payload inválido", details: parsed.error.flatten() }, { status: 400 });
+    logError("Invalid payload", { issues: parsed.error.issues });
+    return NextResponse.json({ error: "Payload inválido", details: parsed.error.flatten(), code: "INVALID_PAYLOAD" }, { status: 400 });
   }
 
   const paymentMethod = parsed.data.paymentMethod;
   const paymentReference = parsed.data.paymentReference?.trim() || null;
 
   if (!VALID_PAYMENT_METHODS.has(paymentMethod)) {
-    return NextResponse.json({ error: "Método de pago inválido" }, { status: 400 });
+    logError("Invalid payment method", { paymentMethod });
+    return NextResponse.json({ error: "Método de pago inválido", code: "INVALID_PAYMENT_METHOD" }, { status: 400 });
   }
 
-  if (paymentMethod === "transfer" && !paymentReference) {
-    return NextResponse.json({ error: "Debe ingresar la referencia de la transferencia" }, { status: 400 });
-  }
-
-  if (paymentMethod === "card" && !paymentReference) {
-    return NextResponse.json({ error: "Debe ingresar la referencia del pago con tarjeta" }, { status: 400 });
-  }
-
-  if (paymentMethod !== "cash" && !env.STRIPE_SECRET_KEY) {
-    return NextResponse.json({ error: "Falta STRIPE_SECRET_KEY para pagos digitales" }, { status: 400 });
+  if ((paymentMethod === "transfer" || paymentMethod === "card") && !paymentReference) {
+    logError("Missing required payment reference", { paymentMethod });
+    return NextResponse.json({ error: "La referencia de pago es obligatoria para tarjeta y transferencia", code: "PAYMENT_REFERENCE_REQUIRED" }, { status: 400 });
   }
 
   const item = parsed.data.items[0];
-  if (!item?.productId) return NextResponse.json({ error: "Producto no informado" }, { status: 400 });
-  if (!item?.qty || item.qty <= 0) return NextResponse.json({ error: "Cantidad inválida" }, { status: 400 });
+  if (!item?.productId) {
+    logError("Missing product id in sale item");
+    return NextResponse.json({ error: "Producto no informado", code: "PRODUCT_ID_REQUIRED" }, { status: 400 });
+  }
+  if (!item?.qty || item.qty <= 0) {
+    logError("Invalid quantity", { qty: item?.qty });
+    return NextResponse.json({ error: "Cantidad inválida", code: "INVALID_QTY" }, { status: 400 });
+  }
 
-  const db = auth.supabase;
+  logInfo("Payload normalized", {
+    sellerId: auth.user.id,
+    productId: item.productId,
+    qty: item.qty,
+    paymentMethod,
+    hasPaymentReference: Boolean(paymentReference),
+    hasCustomerEmail: Boolean(parsed.data.customerEmail),
+  });
+
+  const { data: currentProduct, error: productReadError } = await auth.supabase
+    .from("products")
+    .select("id,name,qty,base_stock,active")
+    .eq("id", item.productId)
+    .maybeSingle();
+
+  if (productReadError) {
+    logError("Failed to read current product stock before RPC", { productReadError, productId: item.productId });
+  } else {
+    logInfo("Current DB stock snapshot", {
+      productId: item.productId,
+      qty: currentProduct?.qty,
+      baseStock: currentProduct?.base_stock,
+      operationalStock:
+        currentProduct
+          ? Math.min(
+              currentProduct.qty ?? Number.POSITIVE_INFINITY,
+              currentProduct.base_stock ?? Number.POSITIVE_INFINITY,
+            )
+          : null,
+      active: currentProduct?.active,
+    });
+  }
+
   let service: ReturnType<typeof getServiceSupabase> | null = null;
   try {
     service = getServiceSupabase();
@@ -60,103 +314,138 @@ export async function POST(req: Request) {
       .ilike("email", parsed.data.customerEmail)
       .maybeSingle();
 
-    if (!profileError) {
-      customerId = profile?.user_id ?? null;
-      customerEmail = profile?.email ?? parsed.data.customerEmail;
+    if (profileError) {
+      logError("Failed customer profile lookup", { profileError });
     }
+
+    customerId = profile?.user_id ?? null;
+    customerEmail = profile?.email ?? parsed.data.customerEmail;
   }
 
-  const { data: product, error: productError } = await db
-    .from("products")
-    .select("id,name,active,price_cents,base_price_cents,qty,base_stock")
-    .eq("id", item.productId)
-    .maybeSingle();
+  logInfo("Calling transactional RPC create_pos_sale", {
+    productId: item.productId,
+    qty: item.qty,
+    paymentMethod,
+    customerId,
+  });
 
-  if (productError) {
-    if (isInvalidApiKeyError(productError.message)) {
+  const { data, error } = await auth.supabase.rpc("create_pos_sale", {
+    p_product_id: item.productId,
+    p_qty: item.qty,
+    p_payment_method: paymentMethod,
+    p_payment_reference: paymentReference,
+    p_customer_email: customerEmail,
+    p_sold_by: auth.user.id,
+    p_customer_id: customerId,
+  });
+
+  if (error) {
+    const code = error.message || "INTERNAL_POS_SALE_ERROR";
+    const status = BUSINESS_ERROR_CODES.has(code) ? 400 : 500;
+
+    logError("RPC create_pos_sale failed", {
+      businessCode: code,
+      details: error.details,
+      hint: error.hint,
+      sqlState: error.code,
+      rpcResponseData: data,
+    });
+
+    if ((error.message || "").includes("Could not find the function public.create_pos_sale")) {
       return NextResponse.json(
-        { error: "Configuración de Supabase inválida (API key). Revisa NEXT_PUBLIC_SUPABASE_ANON_KEY y SUPABASE_SERVICE_ROLE_KEY." },
+        {
+          error:
+            "La función RPC create_pos_sale no está sincronizada en Supabase. Ejecuta las migraciones POS más recientes y recarga schema cache (notify pgrst, 'reload schema').",
+          code: "RPC_NOT_FOUND",
+          details: error.message,
+        },
         { status: 500 },
       );
     }
-    return NextResponse.json({ error: `No se pudo validar producto: ${productError.message}` }, { status: 400 });
-  }
-  if (!product) return NextResponse.json({ error: "Producto no encontrado" }, { status: 404 });
-  if (!product.active) return NextResponse.json({ error: "Producto inactivo" }, { status: 400 });
 
-  const priceCents = product.price_cents ?? product.base_price_cents;
-  const stock = product.qty ?? product.base_stock ?? 0;
-
-  if (priceCents == null || priceCents < 0) {
-    return NextResponse.json({ error: "Precio inválido" }, { status: 400 });
-  }
-
-  if (stock < item.qty) {
-    return NextResponse.json({ error: `Stock insuficiente. Disponible: ${stock}` }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: getClientMessage(code),
+        code,
+        details: error.details,
+        hint: error.hint,
+        sqlState: error.code,
+      },
+      { status },
+    );
   }
 
-  const totalCents = priceCents * item.qty;
-  const pointsEarned = customerId ? Math.floor(totalCents / 100) : 0;
-
-  const { data: order, error: orderError } = await db
-    .from("orders")
-    .insert({
-      user_id: customerId,
-      sold_by: auth.user.id,
-      buyer_email: customerEmail,
-      status: "paid",
-      payment_status: "paid",
-      payment_method: paymentMethod,
-      payment_reference: paymentReference,
-      subtotal_cents: totalCents,
-      total_cents: totalCents,
-      currency: "USD",
-      channel: "physical_store",
-      points_earned: pointsEarned,
-    })
-    .select("id,created_at")
-    .single();
-
-  if (orderError || !order) {
-    return NextResponse.json({ error: orderError?.message || "No se pudo registrar la venta" }, { status: 500 });
-  }
-
-  const { error: itemError } = await db.from("order_items").insert({
-    order_id: order.id,
-    product_id: product.id,
-    name_snapshot: product.name,
-    unit_price_cents_snapshot: priceCents,
-    qty: item.qty,
+  logInfo("Raw RPC success payload", {
+    isArray: Array.isArray(data),
+    payloadKeys: data && typeof data === "object" ? Object.keys(data as Record<string, unknown>) : [],
+    data,
   });
 
-  if (itemError) {
-    return NextResponse.json({ error: `No se pudo registrar el detalle de venta: ${itemError.message}` }, { status: 500 });
+  const normalized = await normalizeRpcResult(data, auth.supabase);
+  if (!normalized) {
+    logError("RPC returned no error but unsupported payload shape", { data });
+    return NextResponse.json(
+      {
+        error: "No se pudo registrar la venta: respuesta no reconocida del motor transaccional",
+        code: "UNSUPPORTED_RPC_RESPONSE",
+      },
+      { status: 500 },
+    );
   }
 
-  const { error: stockError } = await db
-    .from("products")
-    .update({ base_stock: stock - item.qty, qty: stock - item.qty })
-    .eq("id", product.id)
-    .gte("qty", item.qty);
+  const resolvedTotalCents =
+    normalized.totalCents != null
+      ? normalized.totalCents
+      : await resolveTotalCents(
+          auth.supabase as {
+            from: (table: string) => {
+              select: (columns: string) => {
+                eq: (column: string, value: string) => {
+                  maybeSingle: () => Promise<{ data: Record<string, unknown> | null }>;
+                };
+              };
+            };
+          },
+          normalized.orderId,
+        );
 
-  if (stockError) return NextResponse.json({ error: `No se pudo actualizar stock: ${stockError.message}` }, { status: 400 });
+  logInfo("Sale committed in DB transaction", {
+    saleId: normalized.saleId,
+    orderId: normalized.orderId,
+    totalCents: resolvedTotalCents,
+    pointsEarned: normalized.pointsEarned,
+  });
 
-  if (customerId && pointsEarned > 0 && service) {
-    await service.rpc("add_points", {
+  if (customerId && normalized.orderId && normalized.pointsEarned > 0 && service) {
+    const { error: pointsError } = await service.rpc("add_points", {
       p_user_id: customerId,
-      p_points: pointsEarned,
-      p_order_id: order.id,
-      p_description: `Puntos por venta física ${order.id}`,
+      p_points: normalized.pointsEarned,
+      p_order_id: normalized.orderId,
+      p_description: `Puntos por venta física ${normalized.orderId}`,
       p_created_by: auth.user.id,
     });
+
+    if (pointsError) {
+      logError("add_points RPC failed after sale commit", {
+        orderId: normalized.orderId,
+        customerId,
+        pointsError,
+      });
+    }
   }
 
-  return NextResponse.json({
-    ok: true,
-    orderId: order.id,
-    pointsEarned,
-    totalCents,
-    createdAt: order.created_at,
-    paymentReference,
-  });
+  return NextResponse.json(
+    {
+      success: true,
+      saleId: normalized.saleId,
+      orderId: normalized.orderId,
+      productId: item.productId,
+      productName: currentProduct?.name ?? null,
+      pointsEarned: normalized.pointsEarned,
+      totalCents: resolvedTotalCents,
+      createdAt: normalized.createdAt,
+      paymentReference: normalized.paymentReference,
+    },
+    { status: 201 },
+  );
 }

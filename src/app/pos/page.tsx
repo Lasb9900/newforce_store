@@ -15,11 +15,21 @@ export default async function PosPage() {
     .or("qty.gt.0,base_stock.gt.0")
     .order("name");
 
-  const normalizedProducts = (products ?? []).map((p) => ({
-    ...p,
-    price_cents: p.price_cents ?? p.base_price_cents ?? null,
-    qty: p.qty ?? p.base_stock ?? 0,
-  }));
+  const normalizedProducts = (products ?? []).map((p) => {
+    const stockCandidates = [p.qty, p.base_stock].filter((v): v is number => typeof v === "number");
+    const operationalStock = stockCandidates.length ? Math.min(...stockCandidates) : 0;
+
+    return {
+      ...p,
+      price_cents:
+        (typeof p.price_cents === "number" && p.price_cents > 0
+          ? p.price_cents
+          : typeof p.base_price_cents === "number" && p.base_price_cents > 0
+            ? p.base_price_cents
+            : p.price_cents ?? p.base_price_cents ?? null),
+      qty: operationalStock,
+    };
+  });
 
   return (
     <div className="space-y-4">

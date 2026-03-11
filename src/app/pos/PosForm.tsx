@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type PosProduct = {
   id: string;
@@ -16,6 +17,7 @@ type PosProduct = {
 
 type SaleResult = {
   orderId: string;
+  productId: string;
   productName: string;
   qty: number;
   paymentMethod: string;
@@ -36,6 +38,8 @@ function formatCurrency(cents: number | null) {
 }
 
 export default function PosForm({ products }: { products: PosProduct[] }) {
+  const router = useRouter();
+  const [localProducts, setLocalProducts] = useState(products);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(products[0]?.id ?? "");
   const [qty, setQty] = useState(1);
@@ -51,18 +55,25 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
 
   const filteredProducts = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter((p) =>
+    if (!q) return localProducts;
+    return localProducts.filter((p) =>
       [p.name, p.item_number ?? "", p.sku ?? "", p.category ?? ""]
         .join(" ")
         .toLowerCase()
         .includes(q),
     );
-  }, [products, query]);
+  }, [localProducts, query]);
+
+  useEffect(() => {
+    if (!filteredProducts.length) return;
+    if (!filteredProducts.some((p) => p.id === selected)) {
+      setSelected(filteredProducts[0].id);
+    }
+  }, [filteredProducts, selected]);
 
   const selectedProduct = useMemo(
-    () => products.find((p) => p.id === selected) ?? null,
-    [products, selected],
+    () => localProducts.find((p) => p.id === selected) ?? null,
+    [localProducts, selected],
   );
 
   async function onSubmit(e: React.FormEvent) {
@@ -70,7 +81,9 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
     setError(null);
     setMessage(null);
 
-    if (!selected) {
+    const selectedId = selectedProduct?.id ?? selected;
+
+    if (!selectedId) {
       setError("Debes seleccionar un producto");
       return;
     }
@@ -99,29 +112,39 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
           customerEmail: customerEmail.trim() || undefined,
           paymentMethod,
           paymentReference: paymentReference.trim() || undefined,
-          items: [{ productId: selected, qty }],
+          items: [{ productId: selectedId, qty }],
         }),
       });
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "No se pudo registrar la venta");
+        const baseError = data.error || "No se pudo registrar la venta";
+        const enriched = [baseError, data.code ? `(${data.code})` : null, data.hint ? `Hint: ${data.hint}` : null]
+          .filter(Boolean)
+          .join(" ");
+        setError(enriched);
+        if (data.code === "STOCK_INSUFFICIENT") {
+          router.refresh();
+        }
         return;
       }
 
-      setMessage(`Venta registrada: ${data.orderId}`);
+      setMessage(`Venta registrada: ${data.orderId ?? data.saleId}`);
       setLastSale({
-        orderId: data.orderId,
-        productName: selectedProduct?.name ?? "Producto",
+        orderId: data.orderId ?? data.saleId ?? "N/A",
+        productId: data.productId ?? selectedId,
+        productName: data.productName ?? selectedProduct?.name ?? "Producto",
         qty,
         paymentMethod,
         paymentReference: data.paymentReference ?? (paymentReference.trim() || null),
         totalCents: data.totalCents,
         createdAt: data.createdAt ?? new Date().toISOString(),
       });
+      setLocalProducts((prev) => prev.map((p) => (p.id === selectedId ? { ...p, qty: Math.max(0, p.qty - qty) } : p)));
       setQty(1);
       setCustomerEmail("");
       setPaymentReference("");
+      router.refresh();
     } finally {
       setSaving(false);
     }
@@ -216,9 +239,10 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
         <div className="mt-3 rounded-md border border-uiBorder bg-surfaceMuted p-3 text-sm">
           <p className="font-semibold">Última venta registrada</p>
           <p>Orden: {lastSale.orderId}</p>
+          <p>Producto ID: {lastSale.productId}</p>
           <p>Producto: {lastSale.productName}</p>
           <p>Cantidad: {lastSale.qty}</p>
-          <p>Método de pago: {lastSale.paymentMethod}</p>
+          <p>Método de pago: {PAYMENT_METHODS.find((m) => m.value === lastSale.paymentMethod)?.label ?? lastSale.paymentMethod}</p>
           <p>Referencia: {lastSale.paymentReference ?? "—"}</p>
           <p>Total: {formatCurrency(lastSale.totalCents)}</p>
         </div>
