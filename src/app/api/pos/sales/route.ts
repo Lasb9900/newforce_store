@@ -166,47 +166,17 @@ async function normalizeRpcResult(rawData: unknown, supabase: unknown): Promise<
     };
   }
 
-  let { data: posSaleRow } = await db
+  const { data: posSaleRow } = await db
     .from("pos_sales")
-    .select("id,order_id,created_at,total,payment_reference")
+    .select("id,created_at,total,payment_reference")
     .eq("id", candidateId)
     .maybeSingle();
 
-  if (!posSaleRow) {
-    const { data: posSaleWithoutOrderId } = await db
-      .from("pos_sales")
-      .select("id,created_at,total,payment_reference")
-      .eq("id", candidateId)
-      .maybeSingle();
-    posSaleRow = posSaleWithoutOrderId;
-  }
-
   if (posSaleRow) {
-    const orderId = (posSaleRow.order_id as string | null) ?? null;
-
-    if (orderId) {
-      const { data: orderByPosSale } = await db
-        .from("orders")
-        .select("id,created_at,total_cents,points_earned,payment_reference")
-        .eq("id", orderId)
-        .maybeSingle();
-
-      if (orderByPosSale) {
-        return {
-          saleId: String(posSaleRow.id),
-          orderId: String(orderByPosSale.id),
-          createdAt: String(orderByPosSale.created_at ?? ""),
-          totalCents: Number(orderByPosSale.total_cents ?? posSaleRow.total ?? 0),
-          pointsEarned: Number(orderByPosSale.points_earned ?? 0),
-          paymentReference: (orderByPosSale.payment_reference as string | null) ?? (posSaleRow.payment_reference as string | null) ?? null,
-        };
-      }
-    }
-
     // We still return success to avoid false 500 + duplicate retries.
     return {
       saleId: String(posSaleRow.id),
-      orderId,
+      orderId: null,
       createdAt: String(posSaleRow.created_at ?? ""),
       totalCents: Number(posSaleRow.total ?? 0),
       pointsEarned: 0,

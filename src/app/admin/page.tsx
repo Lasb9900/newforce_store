@@ -26,49 +26,52 @@ function toCentsWithMeta(value: unknown): { cents: number; meta: MoneyMeta } {
 export default async function AdminDashboard() {
   const { supabase } = await requireAdminPage();
 
-  const [
-    { data: topRows },
-    { data: lowStock },
-    onlineOrdersResult,
-    physicalOrdersResult,
-    physicalItemsResult,
-    posSalesDebugResult,
-  ] = await Promise.all([
-    supabase.from("admin_top_products").select("product_id,product_name,units_sold,revenue_cents,online_units,physical_units").order("units_sold", { ascending: false }).limit(10),
+  const [{ data: lowStock }, onlineOrdersResult, onlineItemsResult, posRowsResult] = await Promise.all([
     supabase.from("products").select("id,name,qty,base_stock").or("base_stock.lte.5,qty.lte.5").limit(20),
     supabase.from("orders").select("id,total_cents").eq("status", "paid").eq("payment_status", "paid").eq("channel", "online"),
-    supabase.from("orders").select("id,total_cents").eq("status", "paid").eq("payment_status", "paid").eq("channel", "physical_store"),
-    supabase.from("order_items").select("order_id,line_total_cents"),
-    supabase.from("pos_sales").select("id,order_id,total,price,qty").limit(5),
+    supabase.from("order_items").select("product_id,name_snapshot,qty,line_total_cents,orders!inner(status,payment_status,channel)").eq("orders.status", "paid").eq("orders.payment_status", "paid").eq("orders.channel", "online"),
+    supabase.from("pos_sales").select("id,created_at,product_id,product_name,qty,total,payment_method,payment_reference,customer_email"),
   ]);
 
   const onlineRows = onlineOrdersResult.data ?? [];
-  const physicalOrderRows = physicalOrdersResult.data ?? [];
-  const physicalItems = physicalItemsResult.data ?? [];
-  const posRows = posSalesDebugResult.data ?? [];
-
-  const physicalTotalsByOrder = new Map<string, number>();
-  for (const item of physicalItems) {
-    if (!item.order_id) continue;
-    const curr = physicalTotalsByOrder.get(item.order_id) ?? 0;
-    const line = toCentsWithMeta(item.line_total_cents).cents;
-    physicalTotalsByOrder.set(item.order_id, curr + line);
-  }
+  const posRows = posRowsResult.data ?? [];
+  const onlineItems = onlineItemsResult.data ?? [];
 
   const onlineOrders = onlineRows.length;
-  const physicalOrders = physicalOrderRows.length;
+  const physicalOrders = posRows.length;
 
   const onlineRevenue = onlineRows.reduce((sum, row) => sum + toCentsWithMeta(row.total_cents).cents, 0);
-  const physicalRevenue = physicalOrderRows.reduce((sum, row) => {
-    const orderTotal = toCentsWithMeta(row.total_cents).cents;
-    if (orderTotal > 0) return sum + orderTotal;
-    const fallbackFromItems = physicalTotalsByOrder.get(row.id) ?? 0;
-    return sum + fallbackFromItems;
-  }, 0);
-
+  const physicalRevenue = posRows.reduce((sum, row) => sum + toCentsWithMeta(row.total).cents, 0);
   const totalRevenue = onlineRevenue + physicalRevenue;
   const paidOrdersCount = onlineOrders + physicalOrders;
   const averageTicket = paidOrdersCount > 0 ? totalRevenue / paidOrdersCount : 0;
+
+  const topMap = new Map<string, { name: string; units: number; revenue: number; onlineUnits: number; physicalUnits: number }>();
+
+  for (const item of onlineItems) {
+    const curr = topMap.get(item.product_id) ?? { name: item.name_snapshot, units: 0, revenue: 0, onlineUnits: 0, physicalUnits: 0 };
+    const qty = Number(item.qty ?? 0);
+    const revenue = toCentsWithMeta(item.line_total_cents).cents;
+    curr.units += qty;
+    curr.onlineUnits += qty;
+    curr.revenue += revenue;
+    topMap.set(item.product_id, curr);
+  }
+
+  for (const row of posRows) {
+    const curr = topMap.get(row.product_id) ?? { name: row.product_name, units: 0, revenue: 0, onlineUnits: 0, physicalUnits: 0 };
+    const qty = Number(row.qty ?? 0);
+    const revenue = toCentsWithMeta(row.total).cents;
+    curr.units += qty;
+    curr.physicalUnits += qty;
+    curr.revenue += revenue;
+    topMap.set(row.product_id, curr);
+  }
+
+  const ranked = [...topMap.entries()]
+    .map(([product_id, v]) => ({ product_id, name: v.name, units: v.units, revenue: v.revenue, onlineUnits: v.onlineUnits, physicalUnits: v.physicalUnits }))
+    .sort((a, b) => b.units - a.units)
+    .slice(0, 10);
 
   const onlineTypeSample = onlineRows.slice(0, 5).map((r) => ({ value: r.total_cents, type: typeof r.total_cents }));
   const posTypeSample = posRows.slice(0, 5).map((r) => ({ value: r.total, type: typeof r.total }));
@@ -84,8 +87,8 @@ export default async function AdminDashboard() {
   console.log("[ADMIN_KPI] physicalOrders raw:", physicalOrders);
   console.log("[ADMIN_KPI] totalRevenue final:", totalRevenue);
   console.log("[ADMIN_KPI] averageTicket final:", averageTicket);
-  console.log("[ADMIN_KPI] ranked sample:", (topRows ?? []).slice(0, 3));
-  console.log("[ADMIN_KPI] topProductsRevenue sample:", (topRows ?? []).slice(0, 3).map((r) => ({ product: r.product_name, revenue_cents: r.revenue_cents })));
+  console.log("[ADMIN_KPI] ranked sample:", ranked.slice(0, 3));
+  console.log("[ADMIN_KPI] topProductsRevenue sample:", ranked.slice(0, 3).map((r) => ({ product: r.name, revenue_cents: r.revenue })));
   console.log("[ADMIN_KPI] orders.total_cents types:", onlineTypeSample);
   console.log("[ADMIN_KPI] pos_sales.total types:", posTypeSample);
   console.log("[ADMIN_KPI] hasStringOrNullish monetary values:", {
@@ -98,18 +101,8 @@ export default async function AdminDashboard() {
   });
   console.log("[ADMIN_KPI] anyNaN:", anyNaN);
   if (onlineOrdersResult.error) console.log("[ADMIN_KPI] onlineRows error:", onlineOrdersResult.error.message);
-  if (physicalOrdersResult.error) console.log("[ADMIN_KPI] physicalOrders error:", physicalOrdersResult.error.message);
-  if (physicalItemsResult.error) console.log("[ADMIN_KPI] physicalItems error:", physicalItemsResult.error.message);
-  if (posSalesDebugResult.error) console.log("[ADMIN_KPI] posRows error:", posSalesDebugResult.error.message);
-
-  const ranked = (topRows ?? []).map((row) => ({
-    product_id: row.product_id,
-    name: row.product_name,
-    units: Number(row.units_sold ?? 0),
-    revenue: Number(row.revenue_cents ?? 0),
-    onlineUnits: Number(row.online_units ?? 0),
-    physicalUnits: Number(row.physical_units ?? 0),
-  }));
+  if (onlineItemsResult.error) console.log("[ADMIN_KPI] onlineItems error:", onlineItemsResult.error.message);
+  if (posRowsResult.error) console.log("[ADMIN_KPI] posRows error:", posRowsResult.error.message);
 
   return (
     <div className="space-y-4">
