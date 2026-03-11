@@ -9,11 +9,6 @@ export async function POST(req: Request) {
   const body = await req.json();
   console.log("[CHECKOUT] payload received:", body);
 
-  if (!stripe) {
-    console.log("[CHECKOUT] error exact:", "Stripe not configured (missing STRIPE_SECRET_KEY)");
-    return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
-  }
-
   const parsed = createCheckoutSchema.safeParse(body);
   if (!parsed.success) {
     console.log("[CHECKOUT] error exact:", parsed.error.flatten());
@@ -22,7 +17,20 @@ export async function POST(req: Request) {
 
   const shipping = parsed.data.shipping;
   console.log("[CHECKOUT] shipping data present:", !!shipping);
+  console.log("[CHECKOUT] validated shipping country:", shipping.country);
+  console.log("[CHECKOUT] validated shipping state:", shipping.state);
+  console.log("[CHECKOUT] validated ZIP:", shipping.postal_code);
   console.log("[CHECKOUT] cart items:", parsed.data.items);
+
+  if (shipping.country !== "US") {
+    console.log("[CHECKOUT] error exact:", "Shipping country must be US");
+    return NextResponse.json({ error: "Solo enviamos a Estados Unidos" }, { status: 400 });
+  }
+
+  if (!stripe) {
+    console.log("[CHECKOUT] error exact:", "Stripe not configured (missing STRIPE_SECRET_KEY)");
+    return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
+  }
 
   const sb = await getServerSupabase();
   const {
@@ -79,7 +87,7 @@ export async function POST(req: Request) {
     }
   }
 
-  console.log("[CHECKOUT] computed total:", computedTotal);
+  console.log("[CHECKOUT] computed total from DB:", computedTotal);
   if (computedTotal <= 0 || lineItems.length === 0) {
     return NextResponse.json({ error: "Cart total inválido" }, { status: 400 });
   }
@@ -106,6 +114,9 @@ export async function POST(req: Request) {
       shipping_city: shipping.city,
       shipping_state: shipping.state,
       shipping_postal_code: shipping.postal_code,
+      shipping_country: shipping.country,
+      shipping_address_line_2: shipping.address_line_2 ?? "",
+      delivery_notes: shipping.delivery_notes ?? "",
     },
   };
 
@@ -119,6 +130,7 @@ export async function POST(req: Request) {
 
   try {
     const session = await stripe.checkout.sessions.create(sessionParams);
+    console.log("[CHECKOUT] stripe session created:", { id: session.id, url: session.url });
     return NextResponse.json({ url: session.url });
   } catch (error) {
     console.log("[CHECKOUT] error exact:", error);

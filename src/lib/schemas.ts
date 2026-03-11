@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { US_STATE_SET, US_ZIP_REGEX } from "@/lib/us-address";
 
 export const uuidParamSchema = z.object({ id: z.string().uuid() });
 export const productIdParamSchema = z.object({ productId: z.string().uuid() });
@@ -16,9 +17,12 @@ export const checkoutShippingSchema = z.object({
   email: z.string().email(),
   phone: z.string().min(7),
   address_line_1: z.string().min(3),
+  address_line_2: z.string().max(200).optional(),
   city: z.string().min(2),
-  state: z.string().min(2),
-  postal_code: z.string().min(3),
+  state: z.string().transform((v) => v.toUpperCase()).refine((v) => US_STATE_SET.has(v), "Invalid US state"),
+  postal_code: z.string().refine((v) => US_ZIP_REGEX.test(v), "Invalid US ZIP"),
+  country: z.literal("US"),
+  delivery_notes: z.string().max(1000).optional(),
 });
 
 export const createCheckoutSchema = z.object({
