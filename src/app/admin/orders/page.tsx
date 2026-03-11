@@ -13,6 +13,18 @@ type AdminSaleRow = {
   status: string;
 };
 
+type OnlineOrderRow = {
+  id: string;
+  buyer_email?: string | null;
+  total_cents?: number | null;
+  status?: string | null;
+  payment_status?: string | null;
+  payment_method?: string | null;
+  payment_reference?: string | null;
+  channel?: string | null;
+  created_at: string;
+};
+
 export default async function AdminOrders({
   searchParams,
 }: {
@@ -23,15 +35,7 @@ export default async function AdminOrders({
   const params = await searchParams;
   const channel = typeof params.channel === "string" ? params.channel : "";
 
-  const [onlineResult, onlineItemsResult, posResult] = await Promise.all([
-    supabase
-      .from("orders")
-      .select("id,buyer_email,total_cents,status,payment_status,payment_method,payment_reference,channel,created_at")
-      .eq("status", "paid")
-      .eq("payment_status", "paid")
-      .eq("channel", "online")
-      .order("created_at", { ascending: false })
-      .limit(300),
+  const [onlineItemsResult, posResult] = await Promise.all([
     supabase.from("order_items").select("order_id,name_snapshot,qty"),
     supabase
       .from("pos_sales")
@@ -40,7 +44,27 @@ export default async function AdminOrders({
       .limit(300),
   ]);
 
-  const onlineRows = onlineResult.data ?? [];
+  let onlineResult = await supabase
+    .from("orders")
+    .select("id,buyer_email,total_cents,status,payment_status,payment_method,payment_reference,channel,created_at")
+    .eq("status", "paid")
+    .eq("payment_status", "paid")
+    .eq("channel", "online")
+    .order("created_at", { ascending: false })
+    .limit(300);
+
+  if (onlineResult.error?.message?.includes("column orders.payment_reference does not exist")) {
+    onlineResult = await supabase
+      .from("orders")
+      .select("id,buyer_email,total_cents,status,payment_status,payment_method,channel,created_at")
+      .eq("status", "paid")
+      .eq("payment_status", "paid")
+      .eq("channel", "online")
+      .order("created_at", { ascending: false })
+      .limit(300);
+  }
+
+  const onlineRows = (onlineResult.data ?? []) as OnlineOrderRow[];
   const posRows = posResult.data ?? [];
   const onlineItems = onlineItemsResult.data ?? [];
 
@@ -66,7 +90,7 @@ export default async function AdminOrders({
       total_cents: Number(row.total_cents ?? 0),
       payment_method: row.payment_method ?? "—",
       payment_reference: row.payment_reference ?? "—",
-      status: `${row.status}/${row.payment_status}`,
+      status: `${row.status ?? "—"}/${row.payment_status ?? "—"}`,
     };
   });
 
