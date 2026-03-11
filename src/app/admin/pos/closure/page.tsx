@@ -22,7 +22,7 @@ export default async function AdminPosClosurePage({
   const fromIso = new Date(`${from}T00:00:00.000Z`).toISOString();
   const toIso = new Date(`${to}T23:59:59.999Z`).toISOString();
 
-  const { data } = await fetchPosSalesRange(fromIso, toIso);
+  const { data, error } = await fetchPosSalesRange(fromIso, toIso);
   const sales = data ?? [];
   const totals = sumPosTotals(sales);
 
@@ -43,6 +43,7 @@ export default async function AdminPosClosurePage({
         <article className="rounded border border-uiBorder bg-surface p-3"><p className="text-xs text-mutedText">Transferencia</p><p className="text-xl font-bold">{toMoney(totals.transferCents)}</p></article>
       </div>
 
+      {error ? <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">Error cargando ventas POS: {error.message}</p> : null}
       {!sales.length ? <p className="rounded border border-uiBorder bg-surface p-4 text-sm">Sin ventas para el período seleccionado.</p> : null}
       {sales.length ? (
         <div className="overflow-x-auto rounded-xl border border-uiBorder bg-surface">

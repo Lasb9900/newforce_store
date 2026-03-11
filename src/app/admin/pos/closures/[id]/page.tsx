@@ -12,10 +12,19 @@ export default async function AdminPosClosureDetail({ params }: { params: Promis
   const { data: closure } = await supabase.from("pos_cash_closures").select("*").eq("id", id).maybeSingle();
   if (!closure) notFound();
 
-  const { data: sales } = await supabase
+  const salesWithRef = await supabase
     .from("pos_cash_closure_sales")
     .select("sale_order_id,orders!inner(id,created_at,payment_method,payment_reference,buyer_email,total_cents,order_items(name_snapshot,qty,unit_price_cents_snapshot,line_total_cents))")
     .eq("closure_id", id);
+
+  let sales = salesWithRef.data;
+  if (salesWithRef.error?.message?.includes("column orders.payment_reference does not exist")) {
+    const fallback = await supabase
+      .from("pos_cash_closure_sales")
+      .select("sale_order_id,orders!inner(id,created_at,payment_method,buyer_email,total_cents,order_items(name_snapshot,qty,unit_price_cents_snapshot,line_total_cents))")
+      .eq("closure_id", id);
+    sales = fallback.data;
+  }
 
   return (
     <div className="space-y-4">

@@ -11,10 +11,25 @@ export default async function AdminDashboard() {
 
   const paidOrdersMap = new Map((paidOrders ?? []).map((o) => [o.id, o]));
 
+  const revenueByOrder = new Map<string, number>();
+  const itemRevenueByOrder = new Map<string, number>();
+  for (const order of paidOrders ?? []) {
+    revenueByOrder.set(order.id, Math.max(Number(order.total_cents ?? 0), 0));
+  }
+  for (const row of topRows ?? []) {
+    const order = paidOrdersMap.get(row.order_id);
+    if (!order) continue;
+    const current = itemRevenueByOrder.get(row.order_id) ?? 0;
+    itemRevenueByOrder.set(row.order_id, Math.max(current, 0) + Math.max(Number(row.line_total_cents ?? 0), 0));
+  }
+  for (const [orderId, itemRevenue] of itemRevenueByOrder.entries()) {
+    revenueByOrder.set(orderId, itemRevenue);
+  }
+
   const onlineOrders = (paidOrders ?? []).filter((o) => o.channel === "online");
   const physicalOrders = (paidOrders ?? []).filter((o) => o.channel === "physical_store");
-  const onlineRevenue = onlineOrders.reduce((sum, o) => sum + (o.total_cents ?? 0), 0);
-  const physicalRevenue = physicalOrders.reduce((sum, o) => sum + (o.total_cents ?? 0), 0);
+  const onlineRevenue = onlineOrders.reduce((sum, o) => sum + (revenueByOrder.get(o.id) ?? 0), 0);
+  const physicalRevenue = physicalOrders.reduce((sum, o) => sum + (revenueByOrder.get(o.id) ?? 0), 0);
   const totalRevenue = onlineRevenue + physicalRevenue;
   const paidOrdersCount = (paidOrders ?? []).length;
 

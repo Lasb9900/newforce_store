@@ -37,7 +37,7 @@ export function sumPosTotals(rows: PosSaleRow[]): PosTotals {
 export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string, paymentMethod?: string, productQuery?: string) {
   const service = await getServerSupabase();
 
-  const { data: orders, error } = await service
+  const { data: ordersWithRef, error: errorWithRef } = await service
     .from("orders")
     .select("id,created_at,payment_method,payment_reference,buyer_email,order_items(product_id,name_snapshot,qty,unit_price_cents_snapshot,line_total_cents)")
     .eq("channel", "physical_store")
@@ -46,6 +46,24 @@ export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string,
     .gte("created_at", fromDateIso)
     .lte("created_at", toDateIso)
     .order("created_at", { ascending: false });
+
+  let orders = ordersWithRef;
+  let error = errorWithRef;
+
+  if (error?.message?.includes("column orders.payment_reference does not exist")) {
+    const fallback = await service
+      .from("orders")
+      .select("id,created_at,payment_method,buyer_email,order_items(product_id,name_snapshot,qty,unit_price_cents_snapshot,line_total_cents)")
+      .eq("channel", "physical_store")
+      .eq("status", "paid")
+      .eq("payment_status", "paid")
+      .gte("created_at", fromDateIso)
+      .lte("created_at", toDateIso)
+      .order("created_at", { ascending: false });
+
+    orders = fallback.data as typeof ordersWithRef;
+    error = fallback.error;
+  }
 
   if (error) return { data: [] as PosSaleRow[], error };
 

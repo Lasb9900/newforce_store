@@ -29,7 +29,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Ya existe un cierre para este rango" }, { status: 409 });
   }
 
-  const { data: sales } = await fetchPosSalesRange(fromDate, toDate);
+  const fromIso = fromDate.length <= 10 ? new Date(`${fromDate}T00:00:00.000Z`).toISOString() : fromDate;
+  const toIso = toDate.length <= 10 ? new Date(`${toDate}T23:59:59.999Z`).toISOString() : toDate;
+
+  const { data: sales } = await fetchPosSalesRange(fromIso, toIso);
   const totals = sumPosTotals(sales ?? []);
 
   const { data: closure, error: closureError } = await service
