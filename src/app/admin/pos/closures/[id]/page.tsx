@@ -1,20 +1,18 @@
 import { notFound } from "next/navigation";
 import { requireAdminPage } from "@/lib/auth";
-import { getServiceSupabase } from "@/lib/supabase";
 
 function toMoney(cents: number) {
   return new Intl.NumberFormat("es-US", { style: "currency", currency: "USD" }).format(cents / 100);
 }
 
 export default async function AdminPosClosureDetail({ params }: { params: Promise<{ id: string }> }) {
-  await requireAdminPage();
+  const { supabase } = await requireAdminPage();
   const { id } = await params;
-  const service = getServiceSupabase();
 
-  const { data: closure } = await service.from("pos_cash_closures").select("*").eq("id", id).maybeSingle();
+  const { data: closure } = await supabase.from("pos_cash_closures").select("*").eq("id", id).maybeSingle();
   if (!closure) notFound();
 
-  const { data: sales } = await service
+  const { data: sales } = await supabase
     .from("pos_cash_closure_sales")
     .select("sale_order_id,orders!inner(id,created_at,payment_method,payment_reference,buyer_email,total_cents,order_items(name_snapshot,qty,unit_price_cents_snapshot,line_total_cents))")
     .eq("closure_id", id);

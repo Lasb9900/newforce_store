@@ -1,16 +1,14 @@
 import Link from "next/link";
 import { requireAdminPage } from "@/lib/auth";
-import { getServiceSupabase } from "@/lib/supabase";
 
 function toMoney(cents: number) {
   return new Intl.NumberFormat("es-US", { style: "currency", currency: "USD" }).format(cents / 100);
 }
 
 export default async function AdminPosClosuresPage() {
-  await requireAdminPage();
-  const service = getServiceSupabase();
+  const { supabase } = await requireAdminPage();
 
-  const { data } = await service
+  const { data } = await supabase
     .from("pos_cash_closures")
     .select("id,closed_at,closed_by,expected_cash,expected_card,expected_transfer,actual_cash,actual_card,actual_transfer,cash_difference,card_difference,transfer_difference")
     .order("closed_at", { ascending: false })

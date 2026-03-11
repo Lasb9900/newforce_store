@@ -1,5 +1,5 @@
 import "server-only";
-import { getServiceSupabase } from "@/lib/supabase";
+import { getServerSupabase } from "@/lib/supabase";
 
 export type PosSaleRow = {
   order_id: string;
@@ -35,7 +35,7 @@ export function sumPosTotals(rows: PosSaleRow[]): PosTotals {
 }
 
 export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string, paymentMethod?: string, productQuery?: string) {
-  const service = getServiceSupabase();
+  const service = await getServerSupabase();
 
   const { data: orders, error } = await service
     .from("orders")

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/auth";
 import { createPosClosureSchema } from "@/lib/schemas";
-import { getServiceSupabase } from "@/lib/supabase";
 import { fetchPosSalesRange, sumPosTotals } from "@/lib/pos";
 
 export async function POST(req: Request) {
@@ -16,7 +15,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Rango de fechas inválido" }, { status: 400 });
   }
 
-  const service = getServiceSupabase();
+  const service = auth.supabase;
 
   const { data: existing } = await service
     .from("pos_cash_closures")
