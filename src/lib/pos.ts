@@ -37,82 +37,34 @@ export function sumPosTotals(rows: PosSaleRow[]): PosTotals {
 export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string, paymentMethod?: string, productQuery?: string, orderIdQuery?: string) {
   const service = await getServerSupabase();
 
-  if (orderIdQuery?.trim()) {
-    const { data: byId, error: byIdError } = await service
-      .from("orders")
-      .select("id,created_at,payment_method,payment_reference,buyer_email,channel,status,payment_status,order_items(product_id,name_snapshot,qty,unit_price_cents_snapshot,line_total_cents)")
-      .eq("id", orderIdQuery.trim())
-      .eq("channel", "physical_store")
-      .eq("status", "paid")
-      .eq("payment_status", "paid")
-      .maybeSingle();
-
-    if (byIdError) return { data: [] as PosSaleRow[], error: byIdError };
-    if (!byId) return { data: [] as PosSaleRow[], error: null };
-
-    const rows: PosSaleRow[] = (byId.order_items ?? []).map((item) => ({
-      order_id: byId.id,
-      created_at: byId.created_at,
-      product_name: item.name_snapshot,
-      item_number: null,
-      qty: item.qty,
-      price_cents: item.unit_price_cents_snapshot,
-      total_cents: item.line_total_cents ?? item.unit_price_cents_snapshot * item.qty,
-      payment_method: byId.payment_method,
-      payment_reference: byId.payment_reference,
-      customer_email: byId.buyer_email,
-    }));
-
-    return { data: rows, error: null };
-  }
-
-  const { data: ordersWithRef, error: errorWithRef } = await service
-    .from("orders")
-    .select("id,created_at,payment_method,payment_reference,buyer_email,order_items(product_id,name_snapshot,qty,unit_price_cents_snapshot,line_total_cents)")
-    .eq("channel", "physical_store")
-    .eq("status", "paid")
-    .eq("payment_status", "paid")
+  let query = service
+    .from("pos_sales")
+    .select("id,order_id,created_at,product_name,item_number,qty,price,total,payment_method,payment_reference,customer_email")
     .gte("created_at", fromDateIso)
     .lte("created_at", toDateIso)
     .order("created_at", { ascending: false });
 
-  let orders = ordersWithRef;
-  let error = errorWithRef;
-
-  if (error?.message?.includes("column orders.payment_reference does not exist")) {
-    const fallback = await service
-      .from("orders")
-      .select("id,created_at,payment_method,buyer_email,order_items(product_id,name_snapshot,qty,unit_price_cents_snapshot,line_total_cents)")
-      .eq("channel", "physical_store")
-      .eq("status", "paid")
-      .eq("payment_status", "paid")
-      .gte("created_at", fromDateIso)
-      .lte("created_at", toDateIso)
-      .order("created_at", { ascending: false });
-
-    orders = fallback.data as typeof ordersWithRef;
-    error = fallback.error;
+  if (orderIdQuery?.trim()) {
+    const id = orderIdQuery.trim();
+    query = query.or(`order_id.eq.${id},id.eq.${id}`);
   }
+
+  const { data: posRows, error } = await query;
 
   if (error) return { data: [] as PosSaleRow[], error };
 
-  const rows: PosSaleRow[] = [];
-  for (const order of orders ?? []) {
-    for (const item of order.order_items ?? []) {
-      rows.push({
-        order_id: order.id,
-        created_at: order.created_at,
-        product_name: item.name_snapshot,
-        item_number: null,
-        qty: item.qty,
-        price_cents: item.unit_price_cents_snapshot,
-        total_cents: item.line_total_cents ?? item.unit_price_cents_snapshot * item.qty,
-        payment_method: order.payment_method,
-        payment_reference: order.payment_reference,
-        customer_email: order.buyer_email,
-      });
-    }
-  }
+  const rows: PosSaleRow[] = (posRows ?? []).map((row) => ({
+    order_id: row.order_id ?? row.id,
+    created_at: row.created_at,
+    product_name: row.product_name,
+    item_number: row.item_number,
+    qty: row.qty,
+    price_cents: row.price,
+    total_cents: row.total,
+    payment_method: row.payment_method,
+    payment_reference: row.payment_reference,
+    customer_email: row.customer_email,
+  }));
 
   const filtered = rows.filter((row) => {
     if (paymentMethod && row.payment_method !== paymentMethod) return false;

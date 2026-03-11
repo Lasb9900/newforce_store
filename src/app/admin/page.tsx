@@ -3,59 +3,26 @@ import { requireAdminPage } from "@/lib/auth";
 export default async function AdminDashboard() {
   const { supabase } = await requireAdminPage();
 
-  const [{ data: paidOrders }, { data: topRows }, { data: lowStock }] = await Promise.all([
-    supabase.from("orders").select("id,total_cents,channel,status,payment_status").eq("status", "paid").eq("payment_status", "paid"),
-    supabase.from("order_items").select("order_id,product_id,name_snapshot,qty,line_total_cents"),
+  const [{ data: kpis }, { data: topRows }, { data: lowStock }] = await Promise.all([
+    supabase.from("admin_sales_kpis").select("*").single(),
+    supabase.from("admin_top_products").select("product_id,product_name,units_sold,revenue_cents,online_units,physical_units").order("units_sold", { ascending: false }).limit(10),
     supabase.from("products").select("id,name,qty,base_stock").or("base_stock.lte.5,qty.lte.5").limit(20),
   ]);
 
-  const paidOrdersMap = new Map((paidOrders ?? []).map((o) => [o.id, o]));
-
-  const revenueByOrder = new Map<string, number>();
-  const itemRevenueByOrder = new Map<string, number>();
-  for (const order of paidOrders ?? []) {
-    revenueByOrder.set(order.id, Math.max(Number(order.total_cents ?? 0), 0));
-  }
-  for (const row of topRows ?? []) {
-    const order = paidOrdersMap.get(row.order_id);
-    if (!order) continue;
-    const current = itemRevenueByOrder.get(row.order_id) ?? 0;
-    itemRevenueByOrder.set(row.order_id, Math.max(current, 0) + Math.max(Number(row.line_total_cents ?? 0), 0));
-  }
-  for (const [orderId, itemRevenue] of itemRevenueByOrder.entries()) {
-    revenueByOrder.set(orderId, itemRevenue);
-  }
-
-  const onlineOrders = (paidOrders ?? []).filter((o) => o.channel === "online");
-  const physicalOrders = (paidOrders ?? []).filter((o) => o.channel === "physical_store");
-  const onlineRevenue = onlineOrders.reduce((sum, o) => sum + (revenueByOrder.get(o.id) ?? 0), 0);
-  const physicalRevenue = physicalOrders.reduce((sum, o) => sum + (revenueByOrder.get(o.id) ?? 0), 0);
-  const totalRevenue = onlineRevenue + physicalRevenue;
-  const paidOrdersCount = (paidOrders ?? []).length;
-
-  const topByUnits = new Map<string, { name: string; units: number; revenue: number; onlineUnits: number; physicalUnits: number }>();
-  for (const row of topRows ?? []) {
-    const order = paidOrdersMap.get(row.order_id);
-    if (!order) continue;
-
-    const current = topByUnits.get(row.product_id) ?? {
-      name: row.name_snapshot,
-      units: 0,
-      revenue: 0,
-      onlineUnits: 0,
-      physicalUnits: 0,
-    };
-
-    current.units += row.qty ?? 0;
-    current.revenue += row.line_total_cents ?? 0;
-    if (order.channel === "online") current.onlineUnits += row.qty ?? 0;
-    if (order.channel === "physical_store") current.physicalUnits += row.qty ?? 0;
-    topByUnits.set(row.product_id, current);
-  }
-  const ranked = [...topByUnits.entries()]
-    .map(([productId, value]) => ({ product_id: productId, ...value }))
-    .sort((a, b) => b.units - a.units)
-    .slice(0, 10);
+  const onlineOrders = Number(kpis?.online_orders ?? 0);
+  const physicalOrders = Number(kpis?.physical_orders ?? 0);
+  const onlineRevenue = Number(kpis?.online_revenue_cents ?? 0);
+  const physicalRevenue = Number(kpis?.physical_revenue_cents ?? 0);
+  const totalRevenue = Number(kpis?.total_revenue_cents ?? onlineRevenue + physicalRevenue);
+  const paidOrdersCount = Number(kpis?.paid_orders ?? onlineOrders + physicalOrders);
+  const ranked = (topRows ?? []).map((row) => ({
+    product_id: row.product_id,
+    name: row.product_name,
+    units: Number(row.units_sold ?? 0),
+    revenue: Number(row.revenue_cents ?? 0),
+    onlineUnits: Number(row.online_units ?? 0),
+    physicalUnits: Number(row.physical_units ?? 0),
+  }));
 
   return (
     <div className="space-y-4">
@@ -67,7 +34,7 @@ export default async function AdminDashboard() {
         </article>
         <article className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm">
           <p className="text-sm text-mutedText">Ventas online / físicas</p>
-          <p className="text-xl font-bold">{onlineOrders.length} / {physicalOrders.length}</p>
+          <p className="text-xl font-bold">{onlineOrders} / {physicalOrders}</p>
           <p className="text-xs text-mutedText">Ingresos: ${(onlineRevenue / 100).toFixed(2)} / ${(physicalRevenue / 100).toFixed(2)}</p>
         </article>
         <article className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm">
