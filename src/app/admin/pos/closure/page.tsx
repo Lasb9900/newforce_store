@@ -25,7 +25,7 @@ export default async function AdminPosClosurePage({
   const fromIso = new Date(`${from}T00:00:00.000Z`).toISOString();
   const toIso = new Date(`${to}T23:59:59.999Z`).toISOString();
 
-  const { data, error } = await fetchPosSalesRange(fromIso, toIso);
+  const { data, error } = await fetchPosSalesRange(fromIso, toIso, undefined, undefined, undefined, true);
   const sales = data ?? [];
   const totals = sumPosTotals(sales);
 

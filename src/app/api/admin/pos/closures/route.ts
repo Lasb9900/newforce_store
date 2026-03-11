@@ -36,7 +36,7 @@ export async function POST(req: Request) {
   const fromIso = fromDate.length <= 10 ? new Date(`${fromDate}T00:00:00.000Z`).toISOString() : fromDate;
   const toIso = toDate.length <= 10 ? new Date(`${toDate}T23:59:59.999Z`).toISOString() : toDate;
 
-  const { data: sales } = await fetchPosSalesRange(fromIso, toIso);
+  const { data: sales } = await fetchPosSalesRange(fromIso, toIso, undefined, undefined, undefined, true);
   const totals = sumPosTotals(sales ?? []);
 
   const payload = {
@@ -70,6 +70,21 @@ export async function POST(req: Request) {
   if (closureError || !closure) {
     console.log("[POS_CLOSURE] error:", closureError?.message ?? "No closure returned");
     return NextResponse.json({ error: closureError?.message || "No se pudo crear cierre" }, { status: 500 });
+  }
+
+
+  const pendingSaleIds = (sales ?? []).map((sale) => sale.sale_id);
+  if (pendingSaleIds.length > 0) {
+    const { error: markClosedError } = await service
+      .from("pos_sales")
+      .update({ cash_closure_id: closure.id, closed_at: payload.closed_at })
+      .in("id", pendingSaleIds)
+      .is("cash_closure_id", null);
+
+    if (markClosedError) {
+      console.log("[POS_CLOSURE] error:", markClosedError.message);
+      return NextResponse.json({ error: `Cierre creado pero no se pudieron marcar ventas: ${markClosedError.message}` }, { status: 500 });
+    }
   }
 
   const uniqueOrderIds = [
