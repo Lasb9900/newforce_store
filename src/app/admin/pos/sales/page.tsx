@@ -58,9 +58,9 @@ export default async function AdminPosSalesPage({
             </thead>
             <tbody>
               {sales.map((s) => (
-                <tr key={`${s.order_id}-${s.product_name}-${s.created_at}`} className="border-t border-uiBorder">
+                <tr key={`${s.sale_id}-${s.product_name}-${s.created_at}`} className="border-t border-uiBorder">
                   <td className="p-2">{new Date(s.created_at).toLocaleString()}</td>
-                  <td className="p-2 font-mono text-xs">{s.order_id}</td>
+                  <td className="p-2 font-mono text-xs">{s.order_id ?? s.sale_id}</td>
                   <td className="p-2">{s.product_name}</td>
                   <td className="p-2">{s.item_number ?? "—"}</td>
                   <td className="p-2">{s.qty}</td>

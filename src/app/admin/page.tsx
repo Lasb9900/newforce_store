@@ -3,19 +3,19 @@ import { requireAdminPage } from "@/lib/auth";
 export default async function AdminDashboard() {
   const { supabase } = await requireAdminPage();
 
-  const [{ data: kpis }, { data: topRows }, { data: lowStock }] = await Promise.all([
+  const [{ data: kpis, error: kpisError }, { data: topRows, error: topError }, { data: lowStock }] = await Promise.all([
     supabase.from("admin_sales_kpis").select("*").single(),
     supabase.from("admin_top_products").select("product_id,product_name,units_sold,revenue_cents,online_units,physical_units").order("units_sold", { ascending: false }).limit(10),
     supabase.from("products").select("id,name,qty,base_stock").or("base_stock.lte.5,qty.lte.5").limit(20),
   ]);
 
-  const onlineOrders = Number(kpis?.online_orders ?? 0);
-  const physicalOrders = Number(kpis?.physical_orders ?? 0);
-  const onlineRevenue = Number(kpis?.online_revenue_cents ?? 0);
-  const physicalRevenue = Number(kpis?.physical_revenue_cents ?? 0);
-  const totalRevenue = Number(kpis?.total_revenue_cents ?? onlineRevenue + physicalRevenue);
-  const paidOrdersCount = Number(kpis?.paid_orders ?? onlineOrders + physicalOrders);
-  const ranked = (topRows ?? []).map((row) => ({
+  let onlineOrders = Number(kpis?.online_orders ?? 0);
+  let physicalOrders = Number(kpis?.physical_orders ?? 0);
+  let onlineRevenue = Number(kpis?.online_revenue_cents ?? 0);
+  let physicalRevenue = Number(kpis?.physical_revenue_cents ?? 0);
+  let totalRevenue = Number(kpis?.total_revenue_cents ?? onlineRevenue + physicalRevenue);
+  let paidOrdersCount = Number(kpis?.paid_orders ?? onlineOrders + physicalOrders);
+  let ranked = (topRows ?? []).map((row) => ({
     product_id: row.product_id,
     name: row.product_name,
     units: Number(row.units_sold ?? 0),
@@ -23,6 +23,44 @@ export default async function AdminDashboard() {
     onlineUnits: Number(row.online_units ?? 0),
     physicalUnits: Number(row.physical_units ?? 0),
   }));
+
+  if (kpisError || topError) {
+    const [{ data: paidOrders }, { data: orderItems }, { data: posRows }] = await Promise.all([
+      supabase.from("orders").select("id,total_cents,channel,status,payment_status").eq("status", "paid").eq("payment_status", "paid"),
+      supabase.from("order_items").select("order_id,product_id,name_snapshot,qty,line_total_cents"),
+      supabase.from("pos_sales").select("id,product_id,product_name,qty,total").order("created_at", { ascending: false }).limit(1000),
+    ]);
+
+    const online = (paidOrders ?? []).filter((o) => o.channel === "online");
+    const physical = (paidOrders ?? []).filter((o) => o.channel === "physical_store");
+    onlineOrders = online.length;
+    physicalOrders = physical.length;
+    onlineRevenue = online.reduce((sum, o) => sum + Number(o.total_cents ?? 0), 0);
+    physicalRevenue = physical.reduce((sum, o) => sum + Number(o.total_cents ?? 0), 0);
+    totalRevenue = onlineRevenue + physicalRevenue;
+    paidOrdersCount = (paidOrders ?? []).length;
+
+    const orderIds = new Set((paidOrders ?? []).map((o) => o.id));
+    const topMap = new Map<string, { name: string; units: number; revenue: number; onlineUnits: number; physicalUnits: number }>();
+    for (const item of orderItems ?? []) {
+      if (!orderIds.has(item.order_id)) continue;
+      const curr = topMap.get(item.product_id) ?? { name: item.name_snapshot, units: 0, revenue: 0, onlineUnits: 0, physicalUnits: 0 };
+      curr.units += Number(item.qty ?? 0);
+      curr.revenue += Number(item.line_total_cents ?? 0);
+      topMap.set(item.product_id, curr);
+    }
+    for (const pos of posRows ?? []) {
+      const curr = topMap.get(pos.product_id) ?? { name: pos.product_name, units: 0, revenue: 0, onlineUnits: 0, physicalUnits: 0 };
+      curr.units += Number(pos.qty ?? 0);
+      curr.revenue += Number(pos.total ?? 0);
+      curr.physicalUnits += Number(pos.qty ?? 0);
+      topMap.set(pos.product_id, curr);
+    }
+    ranked = [...topMap.entries()]
+      .map(([product_id, v]) => ({ product_id, name: v.name, units: v.units, revenue: v.revenue, onlineUnits: v.onlineUnits, physicalUnits: v.physicalUnits }))
+      .sort((a, b) => b.units - a.units)
+      .slice(0, 10);
+  }
 
   return (
     <div className="space-y-4">

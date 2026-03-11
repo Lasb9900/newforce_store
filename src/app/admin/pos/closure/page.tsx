@@ -54,7 +54,7 @@ export default async function AdminPosClosurePage({
             <thead className="bg-surfaceMuted text-left"><tr><th className="p-2">Fecha</th><th className="p-2">Producto</th><th className="p-2">Método</th><th className="p-2">Referencia</th><th className="p-2">Total</th></tr></thead>
             <tbody>
               {sales.map((s) => (
-                <tr key={`${s.order_id}-${s.created_at}`} className="border-t border-uiBorder"><td className="p-2">{new Date(s.created_at).toLocaleString()}</td><td className="p-2">{s.product_name}</td><td className="p-2">{s.payment_method}</td><td className="p-2">{s.payment_reference ?? "—"}</td><td className="p-2">{toMoney(s.total_cents)}</td></tr>
+                <tr key={`${s.sale_id}-${s.created_at}`} className="border-t border-uiBorder"><td className="p-2">{new Date(s.created_at).toLocaleString()}</td><td className="p-2">{s.product_name}</td><td className="p-2">{s.payment_method}</td><td className="p-2">{s.payment_reference ?? "—"}</td><td className="p-2">{toMoney(s.total_cents)}</td></tr>
               ))}
             </tbody>
           </table>

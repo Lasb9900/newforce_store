@@ -166,11 +166,20 @@ async function normalizeRpcResult(rawData: unknown, supabase: unknown): Promise<
     };
   }
 
-  const { data: posSaleRow } = await db
+  let { data: posSaleRow } = await db
     .from("pos_sales")
     .select("id,order_id,created_at,total,payment_reference")
     .eq("id", candidateId)
     .maybeSingle();
+
+  if (!posSaleRow) {
+    const { data: posSaleWithoutOrderId } = await db
+      .from("pos_sales")
+      .select("id,created_at,total,payment_reference")
+      .eq("id", candidateId)
+      .maybeSingle();
+    posSaleRow = posSaleWithoutOrderId;
+  }
 
   if (posSaleRow) {
     const orderId = (posSaleRow.order_id as string | null) ?? null;
