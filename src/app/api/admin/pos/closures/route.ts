@@ -36,8 +36,8 @@ export async function POST(req: Request) {
   const fromIso = fromDate.length <= 10 ? new Date(`${fromDate}T00:00:00.000Z`).toISOString() : fromDate;
   const toIso = toDate.length <= 10 ? new Date(`${toDate}T23:59:59.999Z`).toISOString() : toDate;
 
-  const { data: sales } = await fetchPosSalesRange(fromIso, toIso, undefined, undefined, undefined, true);
-  const totals = sumPosTotals(sales ?? []);
+  const { data: pendingSalesForTotals } = await fetchPosSalesRange(fromIso, toIso, undefined, undefined, undefined, true);
+  const totals = sumPosTotals(pendingSalesForTotals ?? []);
 
   const payload = {
     closed_at: new Date().toISOString(),
@@ -72,25 +72,51 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: closureError?.message || "No se pudo crear cierre" }, { status: 500 });
   }
 
+  let pendingRowsResult = await service
+    .from("pos_sales")
+    .select("id,order_id")
+    .gte("created_at", fromIso)
+    .lte("created_at", toIso)
+    .is("cash_closure_id", null);
 
-  const pendingSaleIds = (sales ?? []).map((sale) => sale.sale_id);
+  if (pendingRowsResult.error?.message?.includes("column pos_sales.order_id does not exist")) {
+    pendingRowsResult = await service
+      .from("pos_sales")
+      .select("id")
+      .gte("created_at", fromIso)
+      .lte("created_at", toIso)
+      .is("cash_closure_id", null);
+  }
+
+  if (pendingRowsResult.error) {
+    console.log("[POS_CLOSURE] error:", pendingRowsResult.error.message);
+    return NextResponse.json({ error: `Cierre creado pero no se pudieron leer ventas pendientes: ${pendingRowsResult.error.message}` }, { status: 500 });
+  }
+
+  const pendingRows = pendingRowsResult.data ?? [];
+  const pendingSaleIds = pendingRows.map((row) => row.id);
+  console.log("[POS_CLOSURE] pending sales count:", pendingSaleIds.length);
+
   if (pendingSaleIds.length > 0) {
-    const { error: markClosedError } = await service
+    const { data: markedRows, error: markClosedError } = await service
       .from("pos_sales")
       .update({ cash_closure_id: closure.id, closed_at: payload.closed_at })
       .in("id", pendingSaleIds)
-      .is("cash_closure_id", null);
+      .is("cash_closure_id", null)
+      .select("id");
 
     if (markClosedError) {
       console.log("[POS_CLOSURE] error:", markClosedError.message);
       return NextResponse.json({ error: `Cierre creado pero no se pudieron marcar ventas: ${markClosedError.message}` }, { status: 500 });
     }
+
+    console.log("[POS_CLOSURE] marked sales count:", markedRows?.length ?? 0);
   }
 
   const uniqueOrderIds = [
     ...new Set(
-      (sales ?? [])
-        .map((sale) => ("order_id" in sale ? (sale as { order_id?: string | null }).order_id : null))
+      pendingRows
+        .map((row) => ("order_id" in row ? (row as { order_id?: string | null }).order_id : null))
         .filter((id): id is string => Boolean(id)),
     ),
   ];

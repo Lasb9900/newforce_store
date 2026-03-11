@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Props = {
   from: string;
@@ -22,6 +23,7 @@ export default function ClosureForm({ from, to, expectedCashCents, expectedCardC
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const router = useRouter();
 
   const diffs = useMemo(() => {
     const ac = Math.round(Number(actualCash || 0) * 100);
@@ -67,6 +69,7 @@ export default function ClosureForm({ from, to, expectedCashCents, expectedCardC
         return;
       }
       setMsg(`Cierre registrado: ${data.id}`);
+      router.refresh();
     } finally {
       setSaving(false);
     }
