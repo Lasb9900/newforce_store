@@ -3,7 +3,8 @@ import { getServerSupabase } from "@/lib/supabase";
 
 export type PosSaleRow = {
   sale_id: string;
-  order_id: string | null;
+  order_id?: string | null;
+  cash_closure_id?: string | null;
   created_at: string;
   product_name: string;
   item_number: string | null;
@@ -35,37 +36,50 @@ export function sumPosTotals(rows: PosSaleRow[]): PosTotals {
   );
 }
 
-export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string, paymentMethod?: string, productQuery?: string, orderIdQuery?: string) {
+export async function fetchPosSalesRange(
+  fromDateIso: string,
+  toDateIso: string,
+  paymentMethod?: string,
+  productQuery?: string,
+  saleIdQuery?: string,
+  pendingOnly = false,
+) {
   const service = await getServerSupabase();
 
-  let query = service
-    .from("pos_sales")
-    .select("id,order_id,created_at,product_name,item_number,qty,price,total,payment_method,payment_reference,customer_email")
-    .gte("created_at", fromDateIso)
-    .lte("created_at", toDateIso)
-    .order("created_at", { ascending: false });
+  let selectColumns = "id,order_id,cash_closure_id,created_at,product_name,item_number,qty,price,total,payment_method,payment_reference,customer_email";
 
-  if (orderIdQuery?.trim()) {
-    const id = orderIdQuery.trim();
-    query = query.or(`order_id.eq.${id},id.eq.${id}`);
-  }
-
-  let { data: posRows, error } = await query;
-
-  if (error?.message?.includes("column pos_sales.order_id does not exist")) {
-    let fallbackQuery = service
+  const runQuery = async () => {
+    let query = service
       .from("pos_sales")
-      .select("id,created_at,product_name,item_number,qty,price,total,payment_method,payment_reference,customer_email")
+      .select(selectColumns)
       .gte("created_at", fromDateIso)
       .lte("created_at", toDateIso)
       .order("created_at", { ascending: false });
 
-    if (orderIdQuery?.trim()) {
-      const id = orderIdQuery.trim();
-      fallbackQuery = fallbackQuery.eq("id", id);
+    if (saleIdQuery?.trim()) {
+      const id = saleIdQuery.trim();
+      query = query.eq("id", id);
     }
 
-    const fallback = await fallbackQuery;
+    if (pendingOnly) {
+      query = query.is("cash_closure_id", null);
+    }
+
+    return query;
+  };
+
+  let { data: posRows, error } = await runQuery();
+
+  if (error?.message?.includes("column pos_sales.order_id does not exist")) {
+    selectColumns = "id,cash_closure_id,created_at,product_name,item_number,qty,price,total,payment_method,payment_reference,customer_email";
+    const fallback = await runQuery();
+    posRows = fallback.data;
+    error = fallback.error;
+  }
+
+  if (error?.message?.includes("column pos_sales.cash_closure_id does not exist")) {
+    selectColumns = "id,created_at,product_name,item_number,qty,price,total,payment_method,payment_reference,customer_email";
+    const fallback = await runQuery();
     posRows = fallback.data;
     error = fallback.error;
   }
@@ -75,6 +89,7 @@ export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string,
   const rows: PosSaleRow[] = (posRows ?? []).map((row) => ({
     sale_id: row.id,
     order_id: row.order_id ?? null,
+    cash_closure_id: row.cash_closure_id ?? null,
     created_at: row.created_at,
     product_name: row.product_name,
     item_number: row.item_number,
@@ -89,7 +104,7 @@ export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string,
   const filtered = rows.filter((row) => {
     if (paymentMethod && row.payment_method !== paymentMethod) return false;
     if (productQuery && !row.product_name.toLowerCase().includes(productQuery.toLowerCase())) return false;
-    if (orderIdQuery && !`${row.sale_id} ${row.order_id ?? ""}`.toLowerCase().includes(orderIdQuery.toLowerCase())) return false;
+    if (saleIdQuery && !`${row.sale_id}`.toLowerCase().includes(saleIdQuery.toLowerCase())) return false;
     return true;
   });
 

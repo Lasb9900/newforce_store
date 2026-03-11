@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Props = {
   from: string;
@@ -22,6 +23,7 @@ export default function ClosureForm({ from, to, expectedCashCents, expectedCardC
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const router = useRouter();
 
   const diffs = useMemo(() => {
     const ac = Math.round(Number(actualCash || 0) * 100);
@@ -39,12 +41,22 @@ export default function ClosureForm({ from, to, expectedCashCents, expectedCardC
     setMsg(null);
     setSaving(true);
     try {
+      const fromInput = (document.querySelector('input[name="from"]') as HTMLInputElement | null)?.value || from;
+      const toInput = (document.querySelector('input[name="to"]') as HTMLInputElement | null)?.value || to;
+      const payloadFromDate = new Date(`${fromInput}T00:00:00.000Z`).toISOString();
+      const payloadToDate = new Date(`${toInput}T23:59:59.999Z`).toISOString();
+
+      console.log("[POS_CLOSURE] ui fromDate:", fromInput);
+      console.log("[POS_CLOSURE] ui toDate:", toInput);
+      console.log("[POS_CLOSURE] payload from_date:", payloadFromDate);
+      console.log("[POS_CLOSURE] payload to_date:", payloadToDate);
+
       const res = await fetch("/api/admin/pos/closures", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          fromDate: new Date(`${from}T00:00:00.000Z`).toISOString(),
-          toDate: new Date(`${to}T23:59:59.999Z`).toISOString(),
+          fromDate: payloadFromDate,
+          toDate: payloadToDate,
           actualCashCents: Math.round(Number(actualCash || 0) * 100),
           actualCardCents: Math.round(Number(actualCard || 0) * 100),
           actualTransferCents: Math.round(Number(actualTransfer || 0) * 100),
@@ -57,6 +69,7 @@ export default function ClosureForm({ from, to, expectedCashCents, expectedCardC
         return;
       }
       setMsg(`Cierre registrado: ${data.id}`);
+      router.refresh();
     } finally {
       setSaving(false);
     }

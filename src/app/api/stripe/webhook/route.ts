@@ -23,6 +23,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: (error as Error).message }, { status: 400 });
   }
 
+  console.log("[CHECKOUT] webhook received:", event.type);
   if (event.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true });
   }
@@ -41,9 +42,9 @@ export async function POST(req: Request) {
     .from("orders")
     .insert({
       user_id: session.client_reference_id || null,
-      buyer_email: session.customer_details?.email ?? null,
-      buyer_name: session.customer_details?.name ?? null,
-      buyer_phone: session.customer_details?.phone ?? null,
+      buyer_email: session.metadata?.shipping_email ?? session.customer_details?.email ?? null,
+      buyer_name: session.metadata?.shipping_full_name ?? session.customer_details?.name ?? null,
+      buyer_phone: session.metadata?.shipping_phone ?? session.customer_details?.phone ?? null,
       status: "paid",
       payment_status: "paid",
       payment_method: "stripe",
@@ -53,7 +54,15 @@ export async function POST(req: Request) {
       currency: String(session.currency || "usd").toUpperCase(),
       stripe_session_id: session.id,
       stripe_payment_intent_id: String(session.payment_intent || ""),
-      shipping_address: session.customer_details?.address ?? null,
+      shipping_address: {
+        line1: session.metadata?.shipping_address_line_1 ?? session.customer_details?.address?.line1 ?? null,
+        line2: session.metadata?.shipping_address_line_2 ?? session.customer_details?.address?.line2 ?? null,
+        city: session.metadata?.shipping_city ?? session.customer_details?.address?.city ?? null,
+        state: session.metadata?.shipping_state ?? session.customer_details?.address?.state ?? null,
+        postal_code: session.metadata?.shipping_postal_code ?? session.customer_details?.address?.postal_code ?? null,
+        country: session.metadata?.shipping_country ?? session.customer_details?.address?.country ?? "US",
+        delivery_notes: session.metadata?.delivery_notes ?? null,
+      },
       points_earned: Math.floor(Number(session.amount_total ?? 0) / 100),
     })
     .select()
@@ -62,6 +71,8 @@ export async function POST(req: Request) {
   if (orderError || !order) {
     return NextResponse.json({ error: orderError?.message ?? "Cannot create order" }, { status: 500 });
   }
+
+  console.log("[CHECKOUT] order marked paid:", order.id);
 
   for (const item of items) {
     if (item.variantId) {

@@ -1,82 +1,108 @@
 import { requireAdminPage } from "@/lib/auth";
 
+type MoneyMeta = {
+  source: "number" | "string" | "nullish" | "invalid";
+  hadDecimal: boolean;
+};
+
+function toCentsWithMeta(value: unknown): { cents: number; meta: MoneyMeta } {
+  if (value == null) return { cents: 0, meta: { source: "nullish", hadDecimal: false } };
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value <= 0) return { cents: 0, meta: { source: "invalid", hadDecimal: false } };
+    const hadDecimal = !Number.isInteger(value);
+    return { cents: hadDecimal ? Math.round(value * 100) : value, meta: { source: "number", hadDecimal } };
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return { cents: 0, meta: { source: "nullish", hadDecimal: false } };
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed <= 0) return { cents: 0, meta: { source: "invalid", hadDecimal: false } };
+    const hadDecimal = trimmed.includes(".");
+    return { cents: hadDecimal ? Math.round(parsed * 100) : parsed, meta: { source: "string", hadDecimal } };
+  }
+  return { cents: 0, meta: { source: "invalid", hadDecimal: false } };
+}
+
 export default async function AdminDashboard() {
   const { supabase } = await requireAdminPage();
 
-  const [{ data: topRows }, { data: lowStock }, { data: onlinePaidOrders }] = await Promise.all([
-    supabase.from("admin_top_products").select("product_id,product_name,units_sold,revenue_cents,online_units,physical_units").order("units_sold", { ascending: false }).limit(10),
+  const [{ data: lowStock }, onlineOrdersResult, onlineItemsResult, posRowsResult] = await Promise.all([
     supabase.from("products").select("id,name,qty,base_stock").or("base_stock.lte.5,qty.lte.5").limit(20),
     supabase.from("orders").select("id,total_cents").eq("status", "paid").eq("payment_status", "paid").eq("channel", "online"),
+    supabase.from("order_items").select("product_id,name_snapshot,qty,line_total_cents,orders!inner(status,payment_status,channel)").eq("orders.status", "paid").eq("orders.payment_status", "paid").eq("orders.channel", "online"),
+    supabase.from("pos_sales").select("id,created_at,product_id,product_name,qty,total,payment_method,payment_reference,customer_email"),
   ]);
 
-  let onlineOrders = (onlinePaidOrders ?? []).length;
-  let onlineRevenue = (onlinePaidOrders ?? []).reduce((sum, row) => sum + Number(row.total_cents ?? 0), 0);
+  const onlineRows = onlineOrdersResult.data ?? [];
+  const posRows = posRowsResult.data ?? [];
+  const onlineItems = onlineItemsResult.data ?? [];
 
-  let posRows: Array<{ id: string; order_id?: string | null; total?: number | null; price?: number | null; qty?: number | null }> = [];
-  const withOrderId = await supabase.from("pos_sales").select("id,order_id,total,price,qty");
-  if (withOrderId.error?.message?.includes("column pos_sales.order_id does not exist")) {
-    const withoutOrderId = await supabase.from("pos_sales").select("id,total,price,qty");
-    posRows = (withoutOrderId.data ?? []).map((row) => ({ ...row, order_id: null }));
-  } else {
-    posRows = withOrderId.data ?? [];
+  const onlineOrders = onlineRows.length;
+  const physicalOrders = posRows.length;
+
+  const onlineRevenue = onlineRows.reduce((sum, row) => sum + toCentsWithMeta(row.total_cents).cents, 0);
+  const physicalRevenue = posRows.reduce((sum, row) => sum + toCentsWithMeta(row.total).cents, 0);
+  const totalRevenue = onlineRevenue + physicalRevenue;
+  const paidOrdersCount = onlineOrders + physicalOrders;
+  const averageTicket = paidOrdersCount > 0 ? totalRevenue / paidOrdersCount : 0;
+
+  const topMap = new Map<string, { name: string; units: number; revenue: number; onlineUnits: number; physicalUnits: number }>();
+
+  for (const item of onlineItems) {
+    const curr = topMap.get(item.product_id) ?? { name: item.name_snapshot, units: 0, revenue: 0, onlineUnits: 0, physicalUnits: 0 };
+    const qty = Number(item.qty ?? 0);
+    const revenue = toCentsWithMeta(item.line_total_cents).cents;
+    curr.units += qty;
+    curr.onlineUnits += qty;
+    curr.revenue += revenue;
+    topMap.set(item.product_id, curr);
   }
 
-  let physicalRevenue = posRows.reduce((sum, row) => {
-    const lineTotal = Number(row.total ?? 0);
-    if (lineTotal > 0) return sum + lineTotal;
-    return sum + Number(row.price ?? 0) * Number(row.qty ?? 0);
-  }, 0);
-  let physicalOrders = new Set(posRows.map((row) => row.order_id ?? row.id)).size;
-
-  let totalRevenue = onlineRevenue + physicalRevenue;
-  let paidOrdersCount = onlineOrders + physicalOrders;
-
-  let ranked = (topRows ?? []).map((row) => ({
-    product_id: row.product_id,
-    name: row.product_name,
-    units: Number(row.units_sold ?? 0),
-    revenue: Number(row.revenue_cents ?? 0),
-    onlineUnits: Number(row.online_units ?? 0),
-    physicalUnits: Number(row.physical_units ?? 0),
-  }));
-
-  if (!topRows) {
-    const [{ data: paidOrders }, { data: orderItems }, { data: posRows }] = await Promise.all([
-      supabase.from("orders").select("id,total_cents,channel,status,payment_status").eq("status", "paid").eq("payment_status", "paid"),
-      supabase.from("order_items").select("order_id,product_id,name_snapshot,qty,line_total_cents"),
-      supabase.from("pos_sales").select("id,product_id,product_name,qty,total").order("created_at", { ascending: false }).limit(1000),
-    ]);
-
-    const online = (paidOrders ?? []).filter((o) => o.channel === "online");
-    const physical = (paidOrders ?? []).filter((o) => o.channel === "physical_store");
-    onlineOrders = online.length;
-    physicalOrders = physical.length;
-    onlineRevenue = online.reduce((sum, o) => sum + Number(o.total_cents ?? 0), 0);
-    physicalRevenue = physical.reduce((sum, o) => sum + Number(o.total_cents ?? 0), 0);
-    totalRevenue = onlineRevenue + physicalRevenue;
-    paidOrdersCount = (paidOrders ?? []).length;
-
-    const orderIds = new Set((paidOrders ?? []).map((o) => o.id));
-    const topMap = new Map<string, { name: string; units: number; revenue: number; onlineUnits: number; physicalUnits: number }>();
-    for (const item of orderItems ?? []) {
-      if (!orderIds.has(item.order_id)) continue;
-      const curr = topMap.get(item.product_id) ?? { name: item.name_snapshot, units: 0, revenue: 0, onlineUnits: 0, physicalUnits: 0 };
-      curr.units += Number(item.qty ?? 0);
-      curr.revenue += Number(item.line_total_cents ?? 0);
-      topMap.set(item.product_id, curr);
-    }
-    for (const pos of posRows ?? []) {
-      const curr = topMap.get(pos.product_id) ?? { name: pos.product_name, units: 0, revenue: 0, onlineUnits: 0, physicalUnits: 0 };
-      curr.units += Number(pos.qty ?? 0);
-      curr.revenue += Number(pos.total ?? 0);
-      curr.physicalUnits += Number(pos.qty ?? 0);
-      topMap.set(pos.product_id, curr);
-    }
-    ranked = [...topMap.entries()]
-      .map(([product_id, v]) => ({ product_id, name: v.name, units: v.units, revenue: v.revenue, onlineUnits: v.onlineUnits, physicalUnits: v.physicalUnits }))
-      .sort((a, b) => b.units - a.units)
-      .slice(0, 10);
+  for (const row of posRows) {
+    const curr = topMap.get(row.product_id) ?? { name: row.product_name, units: 0, revenue: 0, onlineUnits: 0, physicalUnits: 0 };
+    const qty = Number(row.qty ?? 0);
+    const revenue = toCentsWithMeta(row.total).cents;
+    curr.units += qty;
+    curr.physicalUnits += qty;
+    curr.revenue += revenue;
+    topMap.set(row.product_id, curr);
   }
+
+  const ranked = [...topMap.entries()]
+    .map(([product_id, v]) => ({ product_id, name: v.name, units: v.units, revenue: v.revenue, onlineUnits: v.onlineUnits, physicalUnits: v.physicalUnits }))
+    .sort((a, b) => b.units - a.units)
+    .slice(0, 10);
+
+  const onlineTypeSample = onlineRows.slice(0, 5).map((r) => ({ value: r.total_cents, type: typeof r.total_cents }));
+  const posTypeSample = posRows.slice(0, 5).map((r) => ({ value: r.total, type: typeof r.total }));
+  const anyNaN = [onlineRevenue, physicalRevenue, totalRevenue, averageTicket].some((x) => Number.isNaN(x));
+
+  console.log("[ADMIN_KPI] onlineRows count:", onlineRows.length);
+  console.log("[ADMIN_KPI] posRows count:", posRows.length);
+  console.log("[ADMIN_KPI] onlineRows sample:", onlineRows.slice(0, 3));
+  console.log("[ADMIN_KPI] posRows sample:", posRows.slice(0, 3));
+  console.log("[ADMIN_KPI] onlineRevenue raw:", onlineRevenue);
+  console.log("[ADMIN_KPI] physicalRevenue raw:", physicalRevenue);
+  console.log("[ADMIN_KPI] onlineOrders raw:", onlineOrders);
+  console.log("[ADMIN_KPI] physicalOrders raw:", physicalOrders);
+  console.log("[ADMIN_KPI] totalRevenue final:", totalRevenue);
+  console.log("[ADMIN_KPI] averageTicket final:", averageTicket);
+  console.log("[ADMIN_KPI] ranked sample:", ranked.slice(0, 3));
+  console.log("[ADMIN_KPI] topProductsRevenue sample:", ranked.slice(0, 3).map((r) => ({ product: r.name, revenue_cents: r.revenue })));
+  console.log("[ADMIN_KPI] orders.total_cents types:", onlineTypeSample);
+  console.log("[ADMIN_KPI] pos_sales.total types:", posTypeSample);
+  console.log("[ADMIN_KPI] hasStringOrNullish monetary values:", {
+    online: onlineRows.some((r) => typeof r.total_cents === "string" || r.total_cents == null),
+    pos: posRows.some((r) => typeof r.total === "string" || r.total == null),
+  });
+  console.log("[ADMIN_KPI] hadDecimal monetary values:", {
+    online: onlineRows.slice(0, 20).map((r) => toCentsWithMeta(r.total_cents).meta.hadDecimal),
+    pos: posRows.slice(0, 20).map((r) => toCentsWithMeta(r.total).meta.hadDecimal),
+  });
+  console.log("[ADMIN_KPI] anyNaN:", anyNaN);
+  if (onlineOrdersResult.error) console.log("[ADMIN_KPI] onlineRows error:", onlineOrdersResult.error.message);
+  if (onlineItemsResult.error) console.log("[ADMIN_KPI] onlineItems error:", onlineItemsResult.error.message);
+  if (posRowsResult.error) console.log("[ADMIN_KPI] posRows error:", posRowsResult.error.message);
 
   return (
     <div className="space-y-4">
@@ -93,7 +119,7 @@ export default async function AdminDashboard() {
         </article>
         <article className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm">
           <p className="text-sm text-mutedText">Ticket promedio</p>
-          <p className="text-3xl font-extrabold text-brand-ink">${((totalRevenue / Math.max(paidOrdersCount, 1)) / 100).toFixed(2)}</p>
+          <p className="text-3xl font-extrabold text-brand-ink">${(averageTicket / 100).toFixed(2)}</p>
         </article>
       </div>
 
