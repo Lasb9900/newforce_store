@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CartItemRow } from "@/components/CartItemRow";
 import { useCartStore } from "@/lib/cart-store";
 import { formatCurrency } from "@/lib/utils";
@@ -19,6 +19,8 @@ type ShippingForm = {
   delivery_notes: string;
 };
 
+type FieldErrors = Partial<Record<keyof ShippingForm, string>>;
+
 const initialShipping: ShippingForm = {
   full_name: "",
   email: "",
@@ -36,26 +38,59 @@ export default function CartPage() {
   const { items, hydrate, updateQty, remove } = useCartStore();
   const [loading, setLoading] = useState(false);
   const [shipping, setShipping] = useState<ShippingForm>(initialShipping);
+  const [errors, setErrors] = useState<FieldErrors>({});
 
   useEffect(() => {
     hydrate();
   }, [hydrate]);
 
-  const total = items.reduce((sum, i) => sum + (i.unitPriceCents ?? 0) * i.qty, 0);
+  useEffect(() => {
+    let cancelled = false;
+    async function prefill() {
+      const res = await fetch("/api/me/profile", { cache: "no-store" });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (cancelled) return;
+      const profile = json?.data;
+      setShipping((s) => ({
+        ...s,
+        full_name: s.full_name || profile?.full_name || "",
+        email: s.email || profile?.email || "",
+        phone: s.phone || profile?.phone || "",
+      }));
+    }
+    prefill();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  function shippingValid() {
-    if (!shipping.full_name.trim() || !shipping.email.trim() || !shipping.phone.trim()) return false;
-    if (!shipping.address_line_1.trim() || !shipping.city.trim()) return false;
-    if (!US_STATE_CODES.includes(shipping.state as (typeof US_STATE_CODES)[number])) return false;
-    if (!US_ZIP_REGEX.test(shipping.postal_code.trim())) return false;
-    return shipping.country === "US";
+  const subtotal = items.reduce((sum, i) => sum + (i.unitPriceCents ?? 0) * i.qty, 0);
+  const shippingCents = 0;
+  const taxCents = 0;
+  const total = subtotal + shippingCents + taxCents;
+
+  const canCheckout = useMemo(() => items.length > 0 && !loading, [items.length, loading]);
+
+  function validateShipping(form: ShippingForm) {
+    const nextErrors: FieldErrors = {};
+    if (!form.full_name.trim()) nextErrors.full_name = "Nombre completo es obligatorio";
+    if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) nextErrors.email = "Email inválido";
+    if (form.phone.trim().length < 7) nextErrors.phone = "Teléfono inválido";
+    if (!form.address_line_1.trim()) nextErrors.address_line_1 = "Dirección obligatoria";
+    if (!form.city.trim()) nextErrors.city = "Ciudad obligatoria";
+    if (!US_STATE_CODES.includes(form.state as (typeof US_STATE_CODES)[number])) nextErrors.state = "Selecciona un estado válido";
+    if (!US_ZIP_REGEX.test(form.postal_code.trim())) nextErrors.postal_code = "ZIP inválido (12345 o 12345-6789)";
+    if (form.country !== "US") nextErrors.country = "Solo enviamos a Estados Unidos";
+    return nextErrors;
   }
 
   async function checkout() {
-    if (!shippingValid()) {
-      alert("Completa datos válidos de envío en Estados Unidos (state + ZIP)");
-      return;
-    }
+    const nextErrors = validateShipping(shipping);
+    setErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) return;
+    if (!items.length) return;
 
     setLoading(true);
     const payload = {
@@ -93,40 +128,71 @@ export default function CartPage() {
   }
 
   return (
-    <div className="rounded-xl border border-uiBorder bg-surface p-5 shadow-sm space-y-4">
-      <h1 className="mb-1 text-2xl font-bold">Carrito</h1>
-      <p className="mb-2 text-sm text-mutedText">Revisa cantidades, completa entrega en USA y valida stock antes de checkout.</p>
-      {items.map((item, index) => (
-        <CartItemRow key={`${item.productId}-${item.variantId}-${index}`} item={item} onQty={(qty) => updateQty(index, qty)} onRemove={() => remove(index)} />
-      ))}
+    <div className="space-y-4">
+      <h1 className="text-2xl font-bold">Checkout</h1>
+      <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+        <section className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm space-y-3">
+          <h2 className="text-lg font-semibold">1) Carrito</h2>
+          {!items.length ? <p className="text-sm text-mutedText">Tu carrito está vacío.</p> : null}
+          <div className="space-y-2">{items.map((item, index) => <CartItemRow key={`${item.productId}-${item.variantId}-${index}`} item={item} onQty={(qty) => updateQty(index, qty)} onRemove={() => remove(index)} />)}</div>
+        </section>
 
-      <section className="rounded border border-uiBorder p-4 space-y-3">
-        <h2 className="font-semibold">Datos de entrega (solo Estados Unidos)</h2>
+        <aside className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm space-y-3 h-fit">
+          <h2 className="text-lg font-semibold">2) Resumen de compra</h2>
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center justify-between"><span className="text-mutedText">Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
+            <div className="flex items-center justify-between"><span className="text-mutedText">Shipping</span><span>{shippingCents === 0 ? "Free" : formatCurrency(shippingCents)}</span></div>
+            <div className="flex items-center justify-between"><span className="text-mutedText">Tax</span><span>{formatCurrency(taxCents)}</span></div>
+            <div className="border-t border-uiBorder pt-2 flex items-center justify-between text-base font-bold"><span>Total</span><span className="text-brand-primary">{formatCurrency(total)}</span></div>
+          </div>
+          <button onClick={checkout} disabled={!canCheckout || Object.keys(validateShipping(shipping)).length > 0} className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-60">
+            {loading ? "Procesando..." : "Checkout"}
+          </button>
+          {loading ? <p className="text-xs text-mutedText">Redirecting to payment...</p> : null}
+        </aside>
+      </div>
+
+      <section className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm space-y-3">
+        <h2 className="text-lg font-semibold">3) Datos de entrega (USA)</h2>
         <div className="grid gap-2 md:grid-cols-2">
-          <input className="rounded border border-uiBorder p-2" placeholder="Nombre completo" value={shipping.full_name} onChange={(e) => setShipping((s) => ({ ...s, full_name: e.target.value }))} />
-          <input className="rounded border border-uiBorder p-2" placeholder="Email" type="email" value={shipping.email} onChange={(e) => setShipping((s) => ({ ...s, email: e.target.value }))} />
-          <input className="rounded border border-uiBorder p-2" placeholder="Teléfono" value={shipping.phone} onChange={(e) => setShipping((s) => ({ ...s, phone: e.target.value }))} />
-          <input className="rounded border border-uiBorder p-2" placeholder="Dirección línea 1" value={shipping.address_line_1} onChange={(e) => setShipping((s) => ({ ...s, address_line_1: e.target.value }))} />
-          <input className="rounded border border-uiBorder p-2" placeholder="Dirección línea 2 (opcional)" value={shipping.address_line_2} onChange={(e) => setShipping((s) => ({ ...s, address_line_2: e.target.value }))} />
-          <input className="rounded border border-uiBorder p-2" placeholder="Ciudad" value={shipping.city} onChange={(e) => setShipping((s) => ({ ...s, city: e.target.value }))} />
-          <select className="rounded border border-uiBorder p-2" value={shipping.state} onChange={(e) => setShipping((s) => ({ ...s, state: e.target.value }))}>
-            <option value="">Estado (USA)</option>
-            {US_STATE_CODES.map((code) => (
-              <option key={code} value={code}>{code}</option>
-            ))}
-          </select>
-          <input className="rounded border border-uiBorder p-2" placeholder="ZIP (12345 o 12345-6789)" value={shipping.postal_code} onChange={(e) => setShipping((s) => ({ ...s, postal_code: e.target.value }))} />
-          <input className="rounded border border-uiBorder p-2 md:col-span-2 bg-surfaceMuted" value="US" readOnly />
-          <textarea className="rounded border border-uiBorder p-2 md:col-span-2" placeholder="Notas de entrega (opcional)" value={shipping.delivery_notes} onChange={(e) => setShipping((s) => ({ ...s, delivery_notes: e.target.value }))} />
+          <div>
+            <input className="w-full rounded border border-uiBorder p-2" placeholder="Full name" value={shipping.full_name} onChange={(e) => setShipping((s) => ({ ...s, full_name: e.target.value }))} />
+            {errors.full_name ? <p className="text-xs text-red-600 mt-1">{errors.full_name}</p> : null}
+          </div>
+          <div>
+            <input className="w-full rounded border border-uiBorder p-2" placeholder="Email" type="email" value={shipping.email} onChange={(e) => setShipping((s) => ({ ...s, email: e.target.value }))} />
+            {errors.email ? <p className="text-xs text-red-600 mt-1">{errors.email}</p> : null}
+          </div>
+          <div>
+            <input className="w-full rounded border border-uiBorder p-2" placeholder="Phone (e.g. +1 305 555 1212)" value={shipping.phone} onChange={(e) => setShipping((s) => ({ ...s, phone: e.target.value }))} />
+            {errors.phone ? <p className="text-xs text-red-600 mt-1">{errors.phone}</p> : null}
+          </div>
+          <div>
+            <input className="w-full rounded border border-uiBorder p-2" placeholder="Address line 1" value={shipping.address_line_1} onChange={(e) => setShipping((s) => ({ ...s, address_line_1: e.target.value }))} />
+            {errors.address_line_1 ? <p className="text-xs text-red-600 mt-1">{errors.address_line_1}</p> : null}
+          </div>
+          <input className="w-full rounded border border-uiBorder p-2" placeholder="Address line 2 (optional)" value={shipping.address_line_2} onChange={(e) => setShipping((s) => ({ ...s, address_line_2: e.target.value }))} />
+          <div>
+            <input className="w-full rounded border border-uiBorder p-2" placeholder="City" value={shipping.city} onChange={(e) => setShipping((s) => ({ ...s, city: e.target.value }))} />
+            {errors.city ? <p className="text-xs text-red-600 mt-1">{errors.city}</p> : null}
+          </div>
+          <div>
+            <select className="w-full rounded border border-uiBorder p-2" value={shipping.state} onChange={(e) => setShipping((s) => ({ ...s, state: e.target.value }))}>
+              <option value="">State</option>
+              {US_STATE_CODES.map((code) => (
+                <option key={code} value={code}>{code}</option>
+              ))}
+            </select>
+            {errors.state ? <p className="text-xs text-red-600 mt-1">{errors.state}</p> : null}
+          </div>
+          <div>
+            <input className="w-full rounded border border-uiBorder p-2" placeholder="ZIP (12345 or 12345-6789)" value={shipping.postal_code} onChange={(e) => setShipping((s) => ({ ...s, postal_code: e.target.value }))} />
+            {errors.postal_code ? <p className="text-xs text-red-600 mt-1">{errors.postal_code}</p> : null}
+          </div>
+          <input className="w-full rounded border border-uiBorder p-2 bg-surfaceMuted" value="United States (US)" readOnly />
+          <textarea className="w-full rounded border border-uiBorder p-2 md:col-span-2" placeholder="Delivery notes (optional)" value={shipping.delivery_notes} onChange={(e) => setShipping((s) => ({ ...s, delivery_notes: e.target.value }))} />
         </div>
       </section>
-
-      <div className="mt-4 flex items-center justify-between">
-        <p className="text-xl font-bold text-brand-primary">Total: {formatCurrency(total)}</p>
-        <button onClick={checkout} disabled={loading || !items.length} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60">
-          Checkout
-        </button>
-      </div>
     </div>
   );
 }
