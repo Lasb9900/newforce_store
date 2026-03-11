@@ -11,8 +11,19 @@ export const cartItemSchema = z
   })
   .refine((v) => Boolean(v.productId || v.variantId), "productId or variantId required");
 
+export const checkoutShippingSchema = z.object({
+  full_name: z.string().min(2),
+  email: z.string().email(),
+  phone: z.string().min(7),
+  address_line_1: z.string().min(3),
+  city: z.string().min(2),
+  state: z.string().min(2),
+  postal_code: z.string().min(3),
+});
+
 export const createCheckoutSchema = z.object({
   items: z.array(cartItemSchema).min(1).max(25),
+  shipping: checkoutShippingSchema,
 });
 
 export const reviewSchema = z.object({
