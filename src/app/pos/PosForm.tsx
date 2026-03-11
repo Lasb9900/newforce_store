@@ -119,9 +119,9 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
         return;
       }
 
-      setMessage(`Venta registrada: ${data.orderId}`);
+      setMessage(`Venta registrada: ${data.orderId ?? data.saleId}`);
       setLastSale({
-        orderId: data.orderId,
+        orderId: data.orderId ?? data.saleId ?? "N/A",
         productName: selectedProduct?.name ?? "Producto",
         qty,
         paymentMethod,

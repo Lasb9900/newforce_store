@@ -4,14 +4,6 @@ import { requireSellerApi } from "@/lib/auth";
 import { getServiceSupabase } from "@/lib/supabase";
 
 type RpcArrayShape = {
-  order_id: string;
-  created_at: string;
-  total_cents: number;
-  points_earned: number;
-  payment_reference: string | null;
-};
-
-type RpcObjectShape = {
   success?: boolean;
   sale_id?: string;
   order_id?: string;
@@ -19,6 +11,17 @@ type RpcObjectShape = {
   total_cents?: number;
   points_earned?: number;
   payment_reference?: string | null;
+};
+
+type RpcObjectShape = RpcArrayShape;
+
+type NormalizedSaleResult = {
+  saleId: string;
+  orderId: string | null;
+  createdAt: string | null;
+  totalCents: number | null;
+  pointsEarned: number;
+  paymentReference: string | null;
 };
 
 const VALID_PAYMENT_METHODS = new Set(["cash", "card", "transfer"]);
@@ -66,66 +69,119 @@ function getClientMessage(codeOrMessage: string) {
   }
 }
 
-async function normalizeRpcResult(
-  rawData: unknown,
-  supabase: unknown,
-) {
+function pickRpcObject(rawData: unknown): RpcObjectShape | null {
+  if (Array.isArray(rawData)) {
+    const first = rawData[0] as RpcArrayShape | undefined;
+    if (!first || typeof first !== "object") return null;
+    return first;
+  }
+
+  if (rawData && typeof rawData === "object") {
+    return rawData as RpcObjectShape;
+  }
+
+  return null;
+}
+
+async function normalizeRpcResult(rawData: unknown, supabase: unknown): Promise<NormalizedSaleResult | null> {
   const db = supabase as {
     from: (table: string) => {
       select: (columns: string) => {
         eq: (column: string, value: string) => {
-          maybeSingle: () => Promise<{
-            data: { id: string; created_at: string; total_cents: number; points_earned: number | null; payment_reference: string | null } | null;
-          }>;
+          maybeSingle: () => Promise<{ data: Record<string, unknown> | null }>;
         };
       };
     };
   };
-  const payload = rawData as RpcArrayShape[] | RpcObjectShape | null;
 
-  if (Array.isArray(payload) && payload[0]?.order_id) {
+  const payload = pickRpcObject(rawData);
+  if (!payload) return null;
+
+  const rpcSaysSuccess = payload.success === undefined || payload.success === true;
+  const candidateId = payload.order_id ?? payload.sale_id ?? null;
+
+  if (!rpcSaysSuccess || !candidateId) {
+    return null;
+  }
+
+  // Rich table-return shape (already includes totals)
+  if (payload.order_id && payload.created_at && payload.total_cents != null) {
     return {
-      orderId: payload[0].order_id,
-      createdAt: payload[0].created_at,
-      totalCents: payload[0].total_cents,
-      pointsEarned: payload[0].points_earned,
-      paymentReference: payload[0].payment_reference ?? null,
+      saleId: payload.sale_id ?? payload.order_id,
+      orderId: payload.order_id,
+      createdAt: payload.created_at,
+      totalCents: payload.total_cents,
+      pointsEarned: payload.points_earned ?? 0,
+      paymentReference: payload.payment_reference ?? null,
     };
   }
 
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    const maybeOrderId = payload.order_id ?? payload.sale_id;
+  // Object shape may return sale_id that is actually orders.id OR pos_sales.id depending on DB function version.
+  const { data: orderById } = await db
+    .from("orders")
+    .select("id,created_at,total_cents,points_earned,payment_reference")
+    .eq("id", candidateId)
+    .maybeSingle();
 
-    if (!maybeOrderId) return null;
-
-    if (payload.total_cents != null && payload.created_at) {
-      return {
-        orderId: maybeOrderId,
-        createdAt: payload.created_at,
-        totalCents: payload.total_cents,
-        pointsEarned: payload.points_earned ?? 0,
-        paymentReference: payload.payment_reference ?? null,
-      };
-    }
-
-    const { data: orderRow } = await db
-      .from("orders")
-      .select("id,created_at,total_cents,points_earned,payment_reference")
-      .eq("id", maybeOrderId)
-      .maybeSingle();
-
-    if (orderRow) {
-      return {
-        orderId: orderRow.id,
-        createdAt: orderRow.created_at,
-        totalCents: orderRow.total_cents,
-        pointsEarned: orderRow.points_earned ?? 0,
-        paymentReference: orderRow.payment_reference ?? null,
-      };
-    }
+  if (orderById) {
+    return {
+      saleId: payload.sale_id ?? String(orderById.id),
+      orderId: String(orderById.id),
+      createdAt: String(orderById.created_at ?? ""),
+      totalCents: Number(orderById.total_cents ?? 0),
+      pointsEarned: Number(orderById.points_earned ?? 0),
+      paymentReference: (orderById.payment_reference as string | null) ?? null,
+    };
   }
 
-  return null;
+  const { data: posSaleRow } = await db
+    .from("pos_sales")
+    .select("id,order_id,created_at,total,payment_reference")
+    .eq("id", candidateId)
+    .maybeSingle();
+
+  if (posSaleRow) {
+    const orderId = (posSaleRow.order_id as string | null) ?? null;
+
+    if (orderId) {
+      const { data: orderByPosSale } = await db
+        .from("orders")
+        .select("id,created_at,total_cents,points_earned,payment_reference")
+        .eq("id", orderId)
+        .maybeSingle();
+
+      if (orderByPosSale) {
+        return {
+          saleId: String(posSaleRow.id),
+          orderId: String(orderByPosSale.id),
+          createdAt: String(orderByPosSale.created_at ?? ""),
+          totalCents: Number(orderByPosSale.total_cents ?? posSaleRow.total ?? 0),
+          pointsEarned: Number(orderByPosSale.points_earned ?? 0),
+          paymentReference: (orderByPosSale.payment_reference as string | null) ?? (posSaleRow.payment_reference as string | null) ?? null,
+        };
+      }
+    }
+
+    // We still return success to avoid false 500 + duplicate retries.
+    return {
+      saleId: String(posSaleRow.id),
+      orderId,
+      createdAt: String(posSaleRow.created_at ?? ""),
+      totalCents: Number(posSaleRow.total ?? 0),
+      pointsEarned: 0,
+      paymentReference: (posSaleRow.payment_reference as string | null) ?? null,
+    };
+  }
+
+  // Last-resort success normalization for legacy RPC object payload.
+  return {
+    saleId: candidateId,
+    orderId: payload.order_id ?? null,
+    createdAt: payload.created_at ?? null,
+    totalCents: payload.total_cents ?? null,
+    pointsEarned: payload.points_earned ?? 0,
+    paymentReference: payload.payment_reference ?? null,
+  };
 }
 
 export async function POST(req: Request) {
@@ -297,12 +353,13 @@ export async function POST(req: Request) {
   }
 
   logInfo("Sale committed in DB transaction", {
+    saleId: normalized.saleId,
     orderId: normalized.orderId,
     totalCents: normalized.totalCents,
     pointsEarned: normalized.pointsEarned,
   });
 
-  if (customerId && normalized.pointsEarned > 0 && service) {
+  if (customerId && normalized.orderId && normalized.pointsEarned > 0 && service) {
     const { error: pointsError } = await service.rpc("add_points", {
       p_user_id: customerId,
       p_points: normalized.pointsEarned,
@@ -320,12 +377,16 @@ export async function POST(req: Request) {
     }
   }
 
-  return NextResponse.json({
-    ok: true,
-    orderId: normalized.orderId,
-    pointsEarned: normalized.pointsEarned,
-    totalCents: normalized.totalCents,
-    createdAt: normalized.createdAt,
-    paymentReference: normalized.paymentReference,
-  });
+  return NextResponse.json(
+    {
+      success: true,
+      saleId: normalized.saleId,
+      orderId: normalized.orderId,
+      pointsEarned: normalized.pointsEarned,
+      totalCents: normalized.totalCents,
+      createdAt: normalized.createdAt,
+      paymentReference: normalized.paymentReference,
+    },
+    { status: 201 },
+  );
 }
