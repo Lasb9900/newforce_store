@@ -3,19 +3,18 @@ import { requireAdminPage } from "@/lib/auth";
 export default async function AdminDashboard() {
   const { supabase } = await requireAdminPage();
 
-  const [{ data: kpi }, { data: topProducts }, { data: channels }, { data: lowStock }] = await Promise.all([
+  const [{ data: kpi }, { data: topProducts }, { data: lowStock }] = await Promise.all([
     supabase.from("admin_sales_kpis").select("*").single(),
     supabase
       .from("admin_top_products")
       .select("product_id,product_name,units_sold,revenue_cents,online_units,physical_units")
       .order("units_sold", { ascending: false })
       .limit(10),
-    supabase.from("orders").select("channel,total_cents").eq("status", "paid").eq("payment_status", "paid"),
     supabase.from("products").select("id,name,qty,base_stock").or("base_stock.lte.5,qty.lte.5").limit(20),
   ]);
 
-  const onlineRevenue = channels?.filter((c) => c.channel === "online").reduce((sum, c) => sum + c.total_cents, 0) ?? 0;
-  const physicalRevenue = channels?.filter((c) => c.channel === "physical_store").reduce((sum, c) => sum + c.total_cents, 0) ?? 0;
+  const onlineRevenue = kpi?.online_revenue_cents ?? 0;
+  const physicalRevenue = kpi?.physical_revenue_cents ?? 0;
 
   return (
     <div className="space-y-4">

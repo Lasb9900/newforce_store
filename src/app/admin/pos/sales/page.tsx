@@ -27,7 +27,7 @@ export default async function AdminPosSalesPage({
   const toIso = new Date(`${to}T23:59:59.999Z`).toISOString();
 
   let query = service
-    .from("pos_sales")
+    .from("pos_sales_report")
     .select("id,order_id,created_at,product_name,item_number,qty,price_cents:price,total_cents:total,payment_method,payment_reference,customer_email")
     .gte("created_at", fromIso)
     .lte("created_at", toIso)

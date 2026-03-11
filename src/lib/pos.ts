@@ -37,7 +37,7 @@ export function sumPosTotals(rows: PosSaleRow[]): PosTotals {
 export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string) {
   const service = getServiceSupabase();
   return service
-    .from("pos_sales")
+    .from("pos_sales_report")
     .select("order_id,created_at,product_name,item_number,qty,price_cents:price,total_cents:total,payment_method,payment_reference,customer_email")
     .gte("created_at", fromDateIso)
     .lte("created_at", toDateIso)
