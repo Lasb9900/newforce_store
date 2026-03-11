@@ -21,7 +21,12 @@ export default async function PosPage() {
 
     return {
       ...p,
-      price_cents: p.price_cents ?? p.base_price_cents ?? null,
+      price_cents:
+        (typeof p.price_cents === "number" && p.price_cents > 0
+          ? p.price_cents
+          : typeof p.base_price_cents === "number" && p.base_price_cents > 0
+            ? p.base_price_cents
+            : p.price_cents ?? p.base_price_cents ?? null),
       qty: operationalStock,
     };
   });

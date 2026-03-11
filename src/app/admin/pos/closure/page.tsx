@@ -15,9 +15,12 @@ export default async function AdminPosClosurePage({
   const params = await searchParams;
 
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const from = typeof params.from === "string" ? params.from : today;
-  const to = typeof params.to === "string" ? params.to : today;
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(now.getDate() - 7);
+  const defaultFrom = sevenDaysAgo.toISOString().slice(0, 10);
+  const defaultTo = now.toISOString().slice(0, 10);
+  const from = typeof params.from === "string" ? params.from : defaultFrom;
+  const to = typeof params.to === "string" ? params.to : defaultTo;
 
   const fromIso = new Date(`${from}T00:00:00.000Z`).toISOString();
   const toIso = new Date(`${to}T23:59:59.999Z`).toISOString();
