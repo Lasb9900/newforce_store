@@ -1,5 +1,5 @@
 import { requireAdminPage } from "@/lib/auth";
-import { getServiceSupabase } from "@/lib/supabase";
+import { fetchPosSalesRange } from "@/lib/pos";
 
 function toMoney(cents: number) {
   return new Intl.NumberFormat("es-US", { style: "currency", currency: "USD" }).format(cents / 100);
@@ -12,7 +12,6 @@ export default async function AdminPosSalesPage({
 }) {
   await requireAdminPage();
   const params = await searchParams;
-  const service = getServiceSupabase();
 
   const now = new Date();
   const sevenDaysAgo = new Date(now);
@@ -26,18 +25,7 @@ export default async function AdminPosSalesPage({
   const fromIso = new Date(`${from}T00:00:00.000Z`).toISOString();
   const toIso = new Date(`${to}T23:59:59.999Z`).toISOString();
 
-  let query = service
-    .from("pos_sales_report")
-    .select("id,order_id,created_at,product_name,item_number,qty,price_cents:price,total_cents:total,payment_method,payment_reference,customer_email")
-    .gte("created_at", fromIso)
-    .lte("created_at", toIso)
-    .order("created_at", { ascending: false })
-    .limit(500);
-
-  if (paymentMethod) query = query.eq("payment_method", paymentMethod);
-  if (product) query = query.ilike("product_name", `%${product}%`);
-
-  const { data: sales } = await query;
+  const { data: sales, error } = await fetchPosSalesRange(fromIso, toIso, paymentMethod || undefined, product || undefined);
 
   return (
     <div className="space-y-4">
@@ -55,6 +43,7 @@ export default async function AdminPosSalesPage({
         <button className="btn-primary" type="submit">Filtrar</button>
       </form>
 
+      {error ? <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">Error cargando ventas POS: {error.message}</p> : null}
       {!sales?.length ? <p className="rounded border border-uiBorder bg-surface p-4 text-sm">Sin ventas en el período.</p> : null}
 
       {sales?.length ? (
@@ -67,7 +56,7 @@ export default async function AdminPosSalesPage({
             </thead>
             <tbody>
               {sales.map((s) => (
-                <tr key={s.id} className="border-t border-uiBorder">
+                <tr key={`${s.order_id}-${s.product_name}-${s.created_at}`} className="border-t border-uiBorder">
                   <td className="p-2">{new Date(s.created_at).toLocaleString()}</td>
                   <td className="p-2">{s.product_name}</td>
                   <td className="p-2">{s.item_number ?? "—"}</td>

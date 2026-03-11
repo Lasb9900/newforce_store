@@ -2,7 +2,7 @@ import "server-only";
 import { getServiceSupabase } from "@/lib/supabase";
 
 export type PosSaleRow = {
-  order_id: string | null;
+  order_id: string;
   created_at: string;
   product_name: string;
   item_number: string | null;
@@ -34,12 +34,44 @@ export function sumPosTotals(rows: PosSaleRow[]): PosTotals {
   );
 }
 
-export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string) {
+export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string, paymentMethod?: string, productQuery?: string) {
   const service = getServiceSupabase();
-  return service
-    .from("pos_sales_report")
-    .select("order_id,created_at,product_name,item_number,qty,price_cents:price,total_cents:total,payment_method,payment_reference,customer_email")
+
+  const { data: orders, error } = await service
+    .from("orders")
+    .select("id,created_at,payment_method,payment_reference,buyer_email,order_items(product_id,name_snapshot,qty,unit_price_cents_snapshot,line_total_cents)")
+    .eq("channel", "physical_store")
+    .eq("status", "paid")
+    .eq("payment_status", "paid")
     .gte("created_at", fromDateIso)
     .lte("created_at", toDateIso)
     .order("created_at", { ascending: false });
+
+  if (error) return { data: [] as PosSaleRow[], error };
+
+  const rows: PosSaleRow[] = [];
+  for (const order of orders ?? []) {
+    for (const item of order.order_items ?? []) {
+      rows.push({
+        order_id: order.id,
+        created_at: order.created_at,
+        product_name: item.name_snapshot,
+        item_number: null,
+        qty: item.qty,
+        price_cents: item.unit_price_cents_snapshot,
+        total_cents: item.line_total_cents ?? item.unit_price_cents_snapshot * item.qty,
+        payment_method: order.payment_method,
+        payment_reference: order.payment_reference,
+        customer_email: order.buyer_email,
+      });
+    }
+  }
+
+  const filtered = rows.filter((row) => {
+    if (paymentMethod && row.payment_method !== paymentMethod) return false;
+    if (productQuery && !row.product_name.toLowerCase().includes(productQuery.toLowerCase())) return false;
+    return true;
+  });
+
+  return { data: filtered, error: null };
 }
