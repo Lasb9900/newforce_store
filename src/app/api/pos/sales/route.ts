@@ -24,6 +24,38 @@ type NormalizedSaleResult = {
   paymentReference: string | null;
 };
 
+async function resolveTotalCents(db: {
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (column: string, value: string) => {
+        maybeSingle: () => Promise<{ data: Record<string, unknown> | null }>;
+      };
+    };
+  };
+}, orderId: string | null): Promise<number | null> {
+  if (!orderId) return null;
+
+  const { data: order } = await db
+    .from("orders")
+    .select("total_cents")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  const total = Number((order?.total_cents as number | undefined) ?? 0);
+  if (Number.isFinite(total) && total > 0) return total;
+
+  const { data: lines } = await db
+    .from("order_items")
+    .select("line_total_cents,qty,unit_price_cents_snapshot")
+    .eq("order_id", orderId)
+    .maybeSingle();
+
+  const fallback =
+    Number((lines?.line_total_cents as number | undefined) ?? 0) ||
+    Number((lines?.unit_price_cents_snapshot as number | undefined) ?? 0) * Number((lines?.qty as number | undefined) ?? 0);
+  return Number.isFinite(fallback) ? fallback : null;
+}
+
 const VALID_PAYMENT_METHODS = new Set(["cash", "card", "transfer"]);
 const BUSINESS_ERROR_CODES = new Set([
   "INVALID_QTY",
@@ -352,10 +384,26 @@ export async function POST(req: Request) {
     );
   }
 
+  const resolvedTotalCents =
+    normalized.totalCents != null
+      ? normalized.totalCents
+      : await resolveTotalCents(
+          auth.supabase as {
+            from: (table: string) => {
+              select: (columns: string) => {
+                eq: (column: string, value: string) => {
+                  maybeSingle: () => Promise<{ data: Record<string, unknown> | null }>;
+                };
+              };
+            };
+          },
+          normalized.orderId,
+        );
+
   logInfo("Sale committed in DB transaction", {
     saleId: normalized.saleId,
     orderId: normalized.orderId,
-    totalCents: normalized.totalCents,
+    totalCents: resolvedTotalCents,
     pointsEarned: normalized.pointsEarned,
   });
 
@@ -385,7 +433,7 @@ export async function POST(req: Request) {
       productId: item.productId,
       productName: currentProduct?.name ?? null,
       pointsEarned: normalized.pointsEarned,
-      totalCents: normalized.totalCents,
+      totalCents: resolvedTotalCents,
       createdAt: normalized.createdAt,
       paymentReference: normalized.paymentReference,
     },

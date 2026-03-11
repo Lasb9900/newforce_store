@@ -37,6 +37,35 @@ export function sumPosTotals(rows: PosSaleRow[]): PosTotals {
 export async function fetchPosSalesRange(fromDateIso: string, toDateIso: string, paymentMethod?: string, productQuery?: string, orderIdQuery?: string) {
   const service = await getServerSupabase();
 
+  if (orderIdQuery?.trim()) {
+    const { data: byId, error: byIdError } = await service
+      .from("orders")
+      .select("id,created_at,payment_method,payment_reference,buyer_email,channel,status,payment_status,order_items(product_id,name_snapshot,qty,unit_price_cents_snapshot,line_total_cents)")
+      .eq("id", orderIdQuery.trim())
+      .eq("channel", "physical_store")
+      .eq("status", "paid")
+      .eq("payment_status", "paid")
+      .maybeSingle();
+
+    if (byIdError) return { data: [] as PosSaleRow[], error: byIdError };
+    if (!byId) return { data: [] as PosSaleRow[], error: null };
+
+    const rows: PosSaleRow[] = (byId.order_items ?? []).map((item) => ({
+      order_id: byId.id,
+      created_at: byId.created_at,
+      product_name: item.name_snapshot,
+      item_number: null,
+      qty: item.qty,
+      price_cents: item.unit_price_cents_snapshot,
+      total_cents: item.line_total_cents ?? item.unit_price_cents_snapshot * item.qty,
+      payment_method: byId.payment_method,
+      payment_reference: byId.payment_reference,
+      customer_email: byId.buyer_email,
+    }));
+
+    return { data: rows, error: null };
+  }
+
   const { data: ordersWithRef, error: errorWithRef } = await service
     .from("orders")
     .select("id,created_at,payment_method,payment_reference,buyer_email,order_items(product_id,name_snapshot,qty,unit_price_cents_snapshot,line_total_cents)")
