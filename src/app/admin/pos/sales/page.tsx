@@ -62,7 +62,7 @@ export default async function AdminPosSalesPage({
           <option value="transfer">Transferencia</option>
         </select>
         <input type="text" name="product" defaultValue={product} placeholder="Producto" className="rounded border border-uiBorder p-2" />
-        <input type="text" name="orderId" defaultValue={orderId} placeholder="Order ID / Sale ID" className="rounded border border-uiBorder p-2" />
+        <input type="text" name="orderId" defaultValue={orderId} placeholder="Sale ID / Legacy Order ID" className="rounded border border-uiBorder p-2" />
         <button className="btn-primary" type="submit">Filtrar</button>
       </form>
 
@@ -81,7 +81,10 @@ export default async function AdminPosSalesPage({
               {sales.map((s) => (
                 <tr key={`${s.sale_id}-${s.product_name}-${s.created_at}`} className="border-t border-uiBorder">
                   <td className="p-2">{new Date(s.created_at).toLocaleString()}</td>
-                  <td className="p-2 font-mono text-xs">{s.legacy_order_id ?? s.sale_id}</td>
+                  <td className="p-2 font-mono text-xs">
+                    {s.sale_id}
+                    {s.legacy_order_id ? <span className="ml-1 text-[10px] text-mutedText">({s.legacy_order_id})</span> : null}
+                  </td>
                   <td className="p-2">{s.product_name}</td>
                   <td className="p-2">{s.item_number ?? "—"}</td>
                   <td className="p-2">{s.qty}</td>

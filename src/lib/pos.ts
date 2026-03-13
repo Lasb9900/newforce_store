@@ -49,6 +49,8 @@ export async function fetchPosSalesRange(
   pendingOnly = false,
 ) {
   const service = await getServerSupabase();
+  const trimmedSaleQuery = saleIdQuery?.trim() ?? "";
+  const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trimmedSaleQuery);
 
   const baseColumns = [
     "id",
@@ -97,8 +99,8 @@ export async function fetchPosSalesRange(
       query = query.is("cash_closure_id", null);
     }
 
-    if (saleIdQuery?.trim()) {
-      query = query.eq("id", saleIdQuery.trim());
+    if (looksLikeUuid) {
+      query = query.eq("id", trimmedSaleQuery);
     }
 
     const result = await query;
