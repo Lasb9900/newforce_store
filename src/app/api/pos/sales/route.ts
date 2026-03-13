@@ -6,12 +6,25 @@ import { processLoyaltyAccrual } from "@/lib/services/loyalty.service";
 
 type RpcArrayShape = {
   success?: boolean;
+  id?: string;
   sale_id?: string;
+  pos_sale_id?: string;
   order_id?: string;
   created_at?: string;
   total_cents?: number;
+  total?: number;
   points_earned?: number;
   payment_reference?: string | null;
+  data?: {
+    id?: string;
+    sale_id?: string;
+    pos_sale_id?: string;
+    order_id?: string;
+    created_at?: string;
+    total_cents?: number;
+    total?: number;
+    payment_reference?: string | null;
+  };
 };
 
 type NormalizedSaleResult = {
@@ -82,6 +95,22 @@ function pickRpcObject(rawData: unknown): RpcArrayShape | null {
   return null;
 }
 
+function extractCandidateIds(payload: RpcArrayShape | null) {
+  if (!payload) return { saleId: null as string | null, orderId: null as string | null };
+
+  const saleId =
+    payload.sale_id ??
+    payload.id ??
+    payload.pos_sale_id ??
+    payload.data?.sale_id ??
+    payload.data?.id ??
+    payload.data?.pos_sale_id ??
+    null;
+
+  const orderId = payload.order_id ?? payload.data?.order_id ?? null;
+  return { saleId, orderId };
+}
+
 async function fetchPosSaleById(db: ReturnType<typeof getServiceSupabase>, saleId: string) {
   const { data } = await db
     .from("pos_sales")
@@ -89,14 +118,14 @@ async function fetchPosSaleById(db: ReturnType<typeof getServiceSupabase>, saleI
     .eq("id", saleId)
     .maybeSingle();
 
-  return data
-    ? {
-        saleId: String(data.id),
-        createdAt: String(data.created_at ?? ""),
-        totalCents: Number(data.total ?? 0),
-        paymentReference: (data.payment_reference as string | null) ?? null,
-      }
-    : null;
+  if (!data) return null;
+
+  return {
+    saleId: String(data.id),
+    createdAt: String(data.created_at ?? ""),
+    totalCents: Number(data.total ?? 0),
+    paymentReference: (data.payment_reference as string | null) ?? null,
+  };
 }
 
 async function fetchPosSaleByOrderId(db: ReturnType<typeof getServiceSupabase>, orderId: string) {
@@ -110,52 +139,117 @@ async function fetchPosSaleByOrderId(db: ReturnType<typeof getServiceSupabase>, 
     return null;
   }
 
-  return data
-    ? {
-        saleId: String(data.id),
-        createdAt: String(data.created_at ?? ""),
-        totalCents: Number(data.total ?? 0),
-        paymentReference: (data.payment_reference as string | null) ?? null,
-      }
-    : null;
+  if (!data) return null;
+
+  return {
+    saleId: String(data.id),
+    createdAt: String(data.created_at ?? ""),
+    totalCents: Number(data.total ?? 0),
+    paymentReference: (data.payment_reference as string | null) ?? null,
+  };
 }
 
-async function normalizeRpcResult(rawData: unknown, db: ReturnType<typeof getServiceSupabase>): Promise<NormalizedSaleResult | null> {
+async function fetchRecentPosSaleFallback(db: ReturnType<typeof getServiceSupabase>, input: {
+  soldBy: string;
+  productId?: string;
+  qty?: number;
+  paymentMethod?: string;
+}) {
+  const query = db
+    .from("pos_sales")
+    .select("id,created_at,total,payment_reference,product_id,qty,payment_method,created_by")
+    .eq("created_by", input.soldBy)
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+  const { data, error } = await query;
+  if (error) {
+    if (error.message?.includes("column pos_sales.created_by does not exist")) {
+      return null;
+    }
+    return null;
+  }
+
+  const candidate = (data ?? []).find((row) => {
+    const sameProduct = input.productId ? String((row as Record<string, unknown>).product_id ?? "") === input.productId : true;
+    const sameQty = typeof input.qty === "number" ? Number((row as Record<string, unknown>).qty ?? -1) === input.qty : true;
+    const sameMethod = input.paymentMethod ? String((row as Record<string, unknown>).payment_method ?? "") === input.paymentMethod : true;
+    return sameProduct && sameQty && sameMethod;
+  }) as Record<string, unknown> | undefined;
+
+  if (!candidate) return null;
+
+  return {
+    saleId: String(candidate.id ?? ""),
+    createdAt: String(candidate.created_at ?? ""),
+    totalCents: Number(candidate.total ?? 0),
+    paymentReference: (candidate.payment_reference as string | null) ?? null,
+  };
+}
+
+async function resolvePosSaleTotalCents(db: ReturnType<typeof getServiceSupabase>, saleId: string, normalizedTotal: number | null) {
+  if (normalizedTotal != null && Number.isFinite(normalizedTotal) && normalizedTotal >= 0) {
+    return normalizedTotal;
+  }
+
+  const row = await fetchPosSaleById(db, saleId);
+  return row?.totalCents ?? 0;
+}
+
+async function normalizeRpcResult(
+  rawData: unknown,
+  db: ReturnType<typeof getServiceSupabase>,
+  fallback: { soldBy: string; productId?: string; qty?: number; paymentMethod?: string },
+): Promise<NormalizedSaleResult | null> {
   const payload = pickRpcObject(rawData);
-  if (!payload) return null;
+  const { saleId: candidateSaleId, orderId: candidateOrderId } = extractCandidateIds(payload);
 
-  const rpcSaysSuccess = payload.success === undefined || payload.success === true;
-  if (!rpcSaysSuccess) return null;
+  logInfo("normalizeRpcResult payload", {
+    isArray: Array.isArray(rawData),
+    payloadKeys: payload ? Object.keys(payload) : [],
+    candidateSaleId,
+    candidateOrderId,
+  });
 
-  const directSaleId = payload.sale_id ?? null;
-  const directOrderId = payload.order_id ?? null;
-
-  if (directSaleId) {
-    const bySaleId = await fetchPosSaleById(db, directSaleId);
-    if (bySaleId) {
+  if (candidateSaleId) {
+    const row = await fetchPosSaleById(db, candidateSaleId);
+    if (row) {
       return {
-        saleId: bySaleId.saleId,
-        orderId: directOrderId,
-        createdAt: payload.created_at ?? bySaleId.createdAt,
-        totalCents: payload.total_cents ?? bySaleId.totalCents,
-        pointsEarned: payload.points_earned ?? 0,
-        paymentReference: payload.payment_reference ?? bySaleId.paymentReference,
+        saleId: row.saleId,
+        orderId: candidateOrderId,
+        createdAt: payload?.created_at ?? payload?.data?.created_at ?? row.createdAt,
+        totalCents: payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? row.totalCents,
+        pointsEarned: payload?.points_earned ?? 0,
+        paymentReference: payload?.payment_reference ?? payload?.data?.payment_reference ?? row.paymentReference,
       };
     }
   }
 
-  if (directOrderId) {
-    const byOrderId = await fetchPosSaleByOrderId(db, directOrderId);
-    if (byOrderId) {
+  if (candidateOrderId) {
+    const row = await fetchPosSaleByOrderId(db, candidateOrderId);
+    if (row) {
       return {
-        saleId: byOrderId.saleId,
-        orderId: directOrderId,
-        createdAt: payload.created_at ?? byOrderId.createdAt,
-        totalCents: payload.total_cents ?? byOrderId.totalCents,
-        pointsEarned: payload.points_earned ?? 0,
-        paymentReference: payload.payment_reference ?? byOrderId.paymentReference,
+        saleId: row.saleId,
+        orderId: candidateOrderId,
+        createdAt: payload?.created_at ?? payload?.data?.created_at ?? row.createdAt,
+        totalCents: payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? row.totalCents,
+        pointsEarned: payload?.points_earned ?? 0,
+        paymentReference: payload?.payment_reference ?? payload?.data?.payment_reference ?? row.paymentReference,
       };
     }
+  }
+
+  const fallbackRow = await fetchRecentPosSaleFallback(db, fallback);
+  if (fallbackRow) {
+    logInfo("normalizeRpcResult fallback hit", { fallbackSaleId: fallbackRow.saleId });
+    return {
+      saleId: fallbackRow.saleId,
+      orderId: candidateOrderId,
+      createdAt: payload?.created_at ?? payload?.data?.created_at ?? fallbackRow.createdAt,
+      totalCents: payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? fallbackRow.totalCents,
+      pointsEarned: payload?.points_earned ?? 0,
+      paymentReference: payload?.payment_reference ?? payload?.data?.payment_reference ?? fallbackRow.paymentReference,
+    };
   }
 
   return null;
@@ -288,7 +382,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No se pudo inicializar servicio POS", code: "SERVICE_NOT_AVAILABLE" }, { status: 500 });
   }
 
-  const normalized = await normalizeRpcResult(rawRpcData, service);
+  logInfo("Raw RPC success payload", {
+    isArray: Array.isArray(rawRpcData),
+    data: rawRpcData,
+  });
+
+  const normalized = await normalizeRpcResult(rawRpcData, service, {
+    soldBy: auth.user.id,
+    productId: item.productId,
+    qty: item.qty,
+    paymentMethod,
+  });
+
   if (!normalized) {
     return NextResponse.json(
       {
@@ -299,7 +404,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const resolvedTotalCents = normalized.totalCents ?? 0;
+  const resolvedTotalCents = await resolvePosSaleTotalCents(service, normalized.saleId, normalized.totalCents);
 
   let loyaltyStatus = "pending";
   let loyaltyPointsAwarded = 0;
