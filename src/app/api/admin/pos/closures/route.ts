@@ -72,12 +72,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: closureError?.message || "No se pudo crear cierre" }, { status: 500 });
   }
 
-  const pendingRowsResult = await service
+  let pendingRowsResult = await service
     .from("pos_sales")
     .select("id")
     .gte("created_at", fromIso)
     .lte("created_at", toIso)
     .is("cash_closure_id", null);
+
+  if (pendingRowsResult.error?.message?.includes("column pos_sales.cash_closure_id does not exist")) {
+    pendingRowsResult = await service
+      .from("pos_sales")
+      .select("id")
+      .gte("created_at", fromIso)
+      .lte("created_at", toIso);
+  }
 
   if (pendingRowsResult.error) {
     console.log("[POS_CLOSURE] error:", pendingRowsResult.error.message);
@@ -95,6 +103,10 @@ export async function POST(req: Request) {
       .in("id", pendingSaleIds)
       .is("cash_closure_id", null)
       .select("id");
+
+    if (markClosedError?.message?.includes("column pos_sales.cash_closure_id does not exist")) {
+      return NextResponse.json({ ok: true, id: closure.id, warning: "Cierre creado sin marcar ventas (schema legacy)." });
+    }
 
     if (markClosedError) {
       console.log("[POS_CLOSURE] error:", markClosedError.message);

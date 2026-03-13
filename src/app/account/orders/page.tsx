@@ -31,10 +31,20 @@ export default async function AccountOrdersPage() {
     .limit(50);
 
   let posSales: Array<Record<string, unknown>> = ((posByUser.data ?? []) as unknown as Array<Record<string, unknown>>);
+  if (posByUser.error?.message?.includes("column pos_sales.loyalty_points_awarded does not exist")) {
+    const retry = await supabase
+      .from("pos_sales")
+      .select("id,created_at,total,payment_method,product_name,qty,price,customer_user_id,customer_email")
+      .eq("customer_user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    posSales = ((retry.data ?? []) as unknown as Array<Record<string, unknown>>);
+  }
+
   if (posByUser.error?.message?.includes("column pos_sales.customer_user_id does not exist") && normalizedProfileEmail) {
     const fallback = await supabase
       .from("pos_sales")
-      .select("id,created_at,total,payment_method,product_name,qty,price,customer_email,loyalty_points_awarded")
+      .select("id,created_at,total,payment_method,product_name,qty,price,customer_email")
       .eq("customer_email", normalizedProfileEmail)
       .order("created_at", { ascending: false })
       .limit(50);
@@ -42,7 +52,7 @@ export default async function AccountOrdersPage() {
   } else if (normalizedProfileEmail) {
     const fallback = await supabase
       .from("pos_sales")
-      .select("id,created_at,total,payment_method,product_name,qty,price,customer_user_id,customer_email,loyalty_points_awarded")
+      .select("id,created_at,total,payment_method,product_name,qty,price,customer_user_id,customer_email")
       .is("customer_user_id", null)
       .eq("customer_email", normalizedProfileEmail)
       .order("created_at", { ascending: false })

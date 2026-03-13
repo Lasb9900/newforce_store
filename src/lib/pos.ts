@@ -71,7 +71,6 @@ export async function fetchPosSalesRange(
     loyalty_status: true,
     loyalty_points_awarded: true,
     loyalty_error: true,
-    order_id: true,
   };
 
   const buildSelectColumns = () => [
@@ -81,7 +80,6 @@ export async function fetchPosSalesRange(
     ...(optionalColumns.loyalty_status ? ["loyalty_status"] : []),
     ...(optionalColumns.loyalty_points_awarded ? ["loyalty_points_awarded"] : []),
     ...(optionalColumns.loyalty_error ? ["loyalty_error"] : []),
-    ...(optionalColumns.order_id ? ["order_id"] : []),
   ].join(",");
 
   let posRows: Array<Record<string, unknown>> = [];
@@ -133,11 +131,6 @@ export async function fetchPosSalesRange(
       optionalColumns.loyalty_error = false;
       continue;
     }
-    if (msg.includes("column pos_sales.order_id does not exist")) {
-      optionalColumns.order_id = false;
-      continue;
-    }
-
     break;
   }
 
@@ -145,7 +138,7 @@ export async function fetchPosSalesRange(
 
   const rows: PosSaleRow[] = posRows.map((row) => ({
     sale_id: String(row.id ?? ""),
-    legacy_order_id: row.order_id ? String(row.order_id) : null,
+    legacy_order_id: null,
     cash_closure_id: row.cash_closure_id ? String(row.cash_closure_id) : null,
     created_at: String(row.created_at ?? ""),
     product_name: String(row.product_name ?? ""),
@@ -168,8 +161,7 @@ export async function fetchPosSalesRange(
     if (saleIdQuery) {
       const q = saleIdQuery.toLowerCase();
       const bySaleId = row.sale_id.toLowerCase().includes(q);
-      const byLegacyOrderId = (row.legacy_order_id ?? "").toLowerCase().includes(q);
-      if (!bySaleId && !byLegacyOrderId) return false;
+      if (!bySaleId) return false;
     }
     if (pendingOnly && optionalColumns.cash_closure_id && row.cash_closure_id) return false;
     return true;
@@ -180,11 +172,15 @@ export async function fetchPosSalesRange(
     return { data: filtered, error: null };
   }
 
-  const { data: loyaltyRows } = await service
+  const { data: loyaltyRows, error: loyaltyError } = await service
     .from("loyalty_transactions")
     .select("source_id,status,points_delta")
     .eq("source_type", "pos_sale")
     .in("source_id", saleIds);
+
+  if (loyaltyError) {
+    return { data: filtered, error: null };
+  }
 
   const loyaltyBySaleId = new Map(
     (loyaltyRows ?? []).map((entry) => [String(entry.source_id), { status: String(entry.status), points: Number(entry.points_delta ?? 0) }]),

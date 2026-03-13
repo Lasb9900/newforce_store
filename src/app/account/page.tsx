@@ -15,7 +15,7 @@ export default async function AccountPage() {
   const { supabase, user, profile } = await requireCustomerPage("/login?next=/account");
   const normalizedProfileEmail = profile?.email?.trim().toLowerCase() ?? null;
 
-  const [{ data: loyaltyTx }, { data: onlineOrders }, posQueryByUser] = await Promise.all([
+  const [loyaltyResult, { data: onlineOrders }, posQueryByUser] = await Promise.all([
     supabase.from("loyalty_transactions").select("points_delta").eq("user_id", user.id).eq("status", "applied"),
     supabase
       .from("orders")
@@ -30,6 +30,8 @@ export default async function AccountPage() {
       .order("created_at", { ascending: false })
       .limit(8),
   ]);
+
+  const loyaltyTx = loyaltyResult.error ? [] : loyaltyResult.data ?? [];
 
   let posSales: Array<Record<string, unknown>> = ((posQueryByUser.data ?? []) as unknown as Array<Record<string, unknown>>);
 

@@ -42,12 +42,12 @@ export default async function AdminPosSalesPage({
   const to = typeof params.to === "string" ? params.to : now.toISOString().slice(0, 10);
   const paymentMethod = typeof params.paymentMethod === "string" ? params.paymentMethod : "";
   const product = typeof params.product === "string" ? params.product : "";
-  const orderId = typeof params.orderId === "string" ? params.orderId : "";
+  const saleId = typeof params.saleId === "string" ? params.saleId : "";
 
   const fromIso = new Date(`${from}T00:00:00.000Z`).toISOString();
   const toIso = new Date(`${to}T23:59:59.999Z`).toISOString();
 
-  const { data: sales, error } = await fetchPosSalesRange(fromIso, toIso, paymentMethod || undefined, product || undefined, orderId || undefined);
+  const { data: sales, error } = await fetchPosSalesRange(fromIso, toIso, paymentMethod || undefined, product || undefined, saleId || undefined);
 
   return (
     <div className="space-y-4">
@@ -62,7 +62,7 @@ export default async function AdminPosSalesPage({
           <option value="transfer">Transferencia</option>
         </select>
         <input type="text" name="product" defaultValue={product} placeholder="Producto" className="rounded border border-uiBorder p-2" />
-        <input type="text" name="orderId" defaultValue={orderId} placeholder="Sale ID / Legacy Order ID" className="rounded border border-uiBorder p-2" />
+        <input type="text" name="saleId" defaultValue={saleId} placeholder="Sale ID" className="rounded border border-uiBorder p-2" />
         <button className="btn-primary" type="submit">Filtrar</button>
       </form>
 

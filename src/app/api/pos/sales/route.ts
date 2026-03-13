@@ -152,27 +152,6 @@ async function fetchPosSaleById(db: ReturnType<typeof getServiceSupabase>, saleI
   };
 }
 
-async function fetchPosSaleByOrderId(db: ReturnType<typeof getServiceSupabase>, orderId: string) {
-  const { data, error } = await db
-    .from("pos_sales")
-    .select("id,created_at,total,payment_reference,order_id")
-    .eq("order_id", orderId)
-    .maybeSingle();
-
-  if (error?.message?.includes("column pos_sales.order_id does not exist")) {
-    return null;
-  }
-
-  if (!data) return null;
-
-  return {
-    saleId: String(data.id),
-    createdAt: String(data.created_at ?? ""),
-    totalCents: Number(data.total ?? 0),
-    paymentReference: (data.payment_reference as string | null) ?? null,
-  };
-}
-
 async function fetchRecentPosSaleFallback(db: ReturnType<typeof getServiceSupabase>, input: {
   soldBy: string;
   productId?: string;
@@ -226,13 +205,12 @@ async function normalizeRpcResult(
   fallback: { soldBy: string; productId?: string; qty?: number; paymentMethod?: string },
 ): Promise<NormalizedSaleResult | null> {
   const payload = pickRpcObject(rawData);
-  const { saleId: candidateSaleId, orderId: candidateOrderId } = extractCandidateIds(payload);
+  const { saleId: candidateSaleId } = extractCandidateIds(payload);
 
   logInfo("normalizeRpcResult payload", {
     isArray: Array.isArray(rawData),
     payloadKeys: payload ? Object.keys(payload) : [],
     candidateSaleId,
-    candidateOrderId,
   });
 
   if (candidateSaleId) {
@@ -240,7 +218,7 @@ async function normalizeRpcResult(
     if (row) {
       return {
         saleId: row.saleId,
-        orderId: candidateOrderId,
+        orderId: null,
         createdAt: payload?.created_at ?? payload?.data?.created_at ?? row.createdAt,
         totalCents: payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? row.totalCents,
         pointsEarned: payload?.points_earned ?? 0,
@@ -249,26 +227,13 @@ async function normalizeRpcResult(
     }
   }
 
-  if (candidateOrderId) {
-    const row = await fetchPosSaleByOrderId(db, candidateOrderId);
-    if (row) {
-      return {
-        saleId: row.saleId,
-        orderId: candidateOrderId,
-        createdAt: payload?.created_at ?? payload?.data?.created_at ?? row.createdAt,
-        totalCents: payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? row.totalCents,
-        pointsEarned: payload?.points_earned ?? 0,
-        paymentReference: payload?.payment_reference ?? payload?.data?.payment_reference ?? row.paymentReference,
-      };
-    }
-  }
 
   const fallbackRow = await fetchRecentPosSaleFallback(db, fallback);
   if (fallbackRow) {
     logInfo("normalizeRpcResult fallback hit", { fallbackSaleId: fallbackRow.saleId });
     return {
       saleId: fallbackRow.saleId,
-      orderId: candidateOrderId,
+      orderId: null,
       createdAt: payload?.created_at ?? payload?.data?.created_at ?? fallbackRow.createdAt,
       totalCents: payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? fallbackRow.totalCents,
       pointsEarned: payload?.points_earned ?? 0,
@@ -409,7 +374,7 @@ export async function POST(req: Request) {
     base.saleId
       ? {
           saleId: base.saleId,
-          orderId: base.orderId,
+          orderId: null,
           createdAt: base.createdAt,
           totalCents: base.totalCents,
           pointsEarned: base.pointsEarned,
@@ -445,7 +410,6 @@ export async function POST(req: Request) {
 
   logInfo("Sale created successfully", {
     saleId: normalized.saleId,
-    orderId: normalized.orderId,
   });
 
   let resolvedTotalCents = normalized.totalCents ?? 0;
@@ -470,7 +434,6 @@ export async function POST(req: Request) {
       metadata: {
         channel: "physical_store",
         sale_id: normalized.saleId,
-        order_id: normalized.orderId,
         seller_id: auth.user.id,
         payment_method: paymentMethod,
       },
@@ -528,7 +491,7 @@ export async function POST(req: Request) {
     {
       success: true,
       saleId: normalized.saleId,
-      orderId: normalized.orderId,
+      warning: loyaltyStatus === "error" ? "Venta creada. Fidelidad no aplicada." : null,
       productId: item.productId,
       pointsEarned: normalized.pointsEarned,
       totalCents: resolvedTotalCents,
