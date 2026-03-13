@@ -1,6 +1,30 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CartItem } from "@/lib/types";
 
+type DbErrorShape = {
+  message: string;
+  details?: string | null;
+  hint?: string | null;
+  code?: string;
+};
+
+export class CartApiError extends Error {
+  step: string;
+  details?: string | null;
+  hint?: string | null;
+  code?: string;
+
+  constructor(step: string, error: unknown, fallbackMessage: string) {
+    const err = (error ?? {}) as Partial<DbErrorShape>;
+    super(err.message ?? fallbackMessage);
+    this.name = "CartApiError";
+    this.step = step;
+    this.details = err.details ?? null;
+    this.hint = err.hint ?? null;
+    this.code = err.code;
+  }
+}
+
 export type CartNotice = {
   type: "info" | "warning";
   message: string;
@@ -150,11 +174,11 @@ async function resolveProductItem(sb: SupabaseClient, productId: string | undefi
 
 async function ensureUserCartId(sb: SupabaseClient, userId: string) {
   const { data: existing, error: findError } = await sb.from("carts").select("id").eq("user_id", userId).maybeSingle();
-  if (findError) throw findError;
+  if (findError) throw new CartApiError("ensure_user_cart.find", findError, "Failed to query user cart");
   if (existing?.id) return existing.id;
 
   const { data: inserted, error: insertError } = await sb.from("carts").insert({ user_id: userId }).select("id").single();
-  if (insertError) throw insertError;
+  if (insertError) throw new CartApiError("ensure_user_cart.insert", insertError, "Failed to create user cart");
   return inserted.id;
 }
 
@@ -162,7 +186,7 @@ export async function saveUserCart(sb: SupabaseClient, userId: string, items: Ca
   const cartId = await ensureUserCartId(sb, userId);
 
   const { error: deleteError } = await sb.from("cart_items").delete().eq("cart_id", cartId);
-  if (deleteError) throw deleteError;
+  if (deleteError) throw new CartApiError("save_cart.delete_items", deleteError, "Failed to clear previous cart items");
 
   if (items.length > 0) {
     const rows = items.map((item) => ({
@@ -175,16 +199,32 @@ export async function saveUserCart(sb: SupabaseClient, userId: string, items: Ca
     }));
 
     const { error: insertError } = await sb.from("cart_items").insert(rows);
-    if (insertError) throw insertError;
+    if (insertError) {
+      const missingColumn = insertError.message.includes("line_key") || insertError.message.includes("price_snapshot_cents");
+      if (missingColumn) {
+        console.warn("[CART_DB_DEBUG] save_cart.insert_legacy_fallback", { message: insertError.message, code: insertError.code ?? null });
+        const legacyRows = items.map((item) => ({
+          cart_id: cartId,
+          product_id: item.productId,
+          variant_id: item.variantId ?? null,
+          quantity: item.qty,
+        }));
+        const { error: legacyError } = await sb.from("cart_items").insert(legacyRows);
+        if (legacyError) throw new CartApiError("save_cart.insert_items_legacy", legacyError, "Failed to save cart items in legacy schema");
+      } else {
+        throw new CartApiError("save_cart.insert_items", insertError, "Failed to save cart items");
+      }
+    }
   }
 
-  await sb.from("carts").update({ updated_at: new Date().toISOString() }).eq("id", cartId);
+  const { error: touchError } = await sb.from("carts").update({ updated_at: new Date().toISOString() }).eq("id", cartId);
+  if (touchError) throw new CartApiError("save_cart.touch_cart", touchError, "Failed to update cart timestamp");
 }
 
 export async function loadUserCart(sb: SupabaseClient, userId: string) {
   const cartId = await ensureUserCartId(sb, userId);
   const { data, error } = await sb.from("cart_items").select("product_id,variant_id,quantity").eq("cart_id", cartId);
-  if (error) throw error;
+  if (error) throw new CartApiError("load_cart.fetch_items", error, "Failed to fetch cart items");
 
   const rawItems = (data ?? []).map((row) => ({
     productId: row.product_id as string | undefined,
