@@ -36,14 +36,16 @@ export async function processLoyaltyAccrual(input: {
 
   const normalizedEmail = normalizeCustomerEmail(input.email);
 
-  const { data, error } = await admin.rpc("process_loyalty_accrual", {
-    p_source_type: input.sourceType,
-    p_source_id: input.sourceId,
-    p_user_id: input.userId ?? null,
-    p_email: normalizedEmail,
+  const rpcParams = {
     p_amount_cents: Math.max(0, Math.floor(input.amountCents ?? 0)),
+    p_email: normalizedEmail,
     p_metadata: input.metadata ?? {},
-  });
+    p_source_id: input.sourceId,
+    p_source_type: input.sourceType,
+    p_user_id: input.userId ?? null,
+  };
+
+  const { data, error } = await admin.rpc("process_loyalty_accrual", rpcParams);
 
   if (error) {
     return {
