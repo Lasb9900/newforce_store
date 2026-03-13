@@ -27,6 +27,15 @@ type RpcArrayShape = {
   };
 };
 
+type PayloadBaseShape = {
+  saleId: string | null;
+  orderId: string | null;
+  createdAt: string | null;
+  totalCents: number | null;
+  pointsEarned: number;
+  paymentReference: string | null;
+};
+
 type NormalizedSaleResult = {
   saleId: string;
   orderId: string | null;
@@ -109,6 +118,21 @@ function extractCandidateIds(payload: RpcArrayShape | null) {
 
   const orderId = payload.order_id ?? payload.data?.order_id ?? null;
   return { saleId, orderId };
+}
+
+function extractBaseFromPayload(rawData: unknown): PayloadBaseShape {
+  const payload = pickRpcObject(rawData);
+  const { saleId, orderId } = extractCandidateIds(payload);
+  const totalCandidate = payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? null;
+
+  return {
+    saleId,
+    orderId,
+    createdAt: payload?.created_at ?? payload?.data?.created_at ?? null,
+    totalCents: totalCandidate != null ? Number(totalCandidate) : null,
+    pointsEarned: Number(payload?.points_earned ?? 0),
+    paymentReference: payload?.payment_reference ?? payload?.data?.payment_reference ?? null,
+  };
 }
 
 async function fetchPosSaleById(db: ReturnType<typeof getServiceSupabase>, saleId: string) {
@@ -288,7 +312,7 @@ async function updatePosSaleLoyaltySnapshot(input: {
     return;
   }
 
-  logError("Unable to persist POS loyalty snapshot", {
+  logError("Failed to update pos_sales loyalty state", {
     saleId: input.saleId,
     userId: input.userId,
     status: input.status,
@@ -375,26 +399,41 @@ export async function POST(req: Request) {
     );
   }
 
-  let service: ReturnType<typeof getServiceSupabase>;
-  try {
-    service = getServiceSupabase();
-  } catch {
-    return NextResponse.json({ error: "No se pudo inicializar servicio POS", code: "SERVICE_NOT_AVAILABLE" }, { status: 500 });
-  }
-
   logInfo("Raw RPC success payload", {
     isArray: Array.isArray(rawRpcData),
     data: rawRpcData,
   });
 
-  const normalized = await normalizeRpcResult(rawRpcData, service, {
-    soldBy: auth.user.id,
-    productId: item.productId,
-    qty: item.qty,
-    paymentMethod,
-  });
+  const base = extractBaseFromPayload(rawRpcData);
+  let normalized: NormalizedSaleResult | null =
+    base.saleId
+      ? {
+          saleId: base.saleId,
+          orderId: base.orderId,
+          createdAt: base.createdAt,
+          totalCents: base.totalCents,
+          pointsEarned: base.pointsEarned,
+          paymentReference: base.paymentReference,
+        }
+      : null;
 
   if (!normalized) {
+    let serviceForCritical: ReturnType<typeof getServiceSupabase>;
+    try {
+      serviceForCritical = getServiceSupabase();
+    } catch {
+      return NextResponse.json({ error: "No se pudo inicializar servicio POS", code: "SERVICE_NOT_AVAILABLE" }, { status: 500 });
+    }
+
+    normalized = await normalizeRpcResult(rawRpcData, serviceForCritical, {
+      soldBy: auth.user.id,
+      productId: item.productId,
+      qty: item.qty,
+      paymentMethod,
+    });
+  }
+
+  if (!normalized?.saleId) {
     return NextResponse.json(
       {
         error: "No se pudo identificar el ID real de la venta POS para procesar fidelidad",
@@ -404,49 +443,74 @@ export async function POST(req: Request) {
     );
   }
 
-  const resolvedTotalCents = await resolvePosSaleTotalCents(service, normalized.saleId, normalized.totalCents);
-
-  let loyaltyStatus = "pending";
-  let loyaltyPointsAwarded = 0;
-
-  const { data: loyaltyData, error: loyaltyError } = await processLoyaltyAccrual({
-    sourceType: "pos_sale",
-    sourceId: normalized.saleId,
-    userId: customerUserId,
-    email: customerEmail,
-    amountCents: resolvedTotalCents,
-    metadata: {
-      channel: "physical_store",
-      sale_id: normalized.saleId,
-      order_id: normalized.orderId,
-      seller_id: auth.user.id,
-      payment_method: paymentMethod,
-    },
+  logInfo("Sale created successfully", {
+    saleId: normalized.saleId,
+    orderId: normalized.orderId,
   });
 
-  if (loyaltyError) {
-    loyaltyStatus = "error";
-    await updatePosSaleLoyaltySnapshot({
-      saleId: normalized.saleId,
-      userId: customerUserId,
-      status: "error",
-      points: 0,
-      loyaltyError: loyaltyError.message,
-    });
-    logError("process_loyalty_accrual failed after POS sale commit", {
-      saleId: normalized.saleId,
-      loyaltyError,
-    });
-  } else {
-    loyaltyStatus = loyaltyData?.status ?? "error";
-    loyaltyPointsAwarded = Number(loyaltyData?.points_awarded ?? 0);
+  let resolvedTotalCents = normalized.totalCents ?? 0;
+  let loyaltyStatus = "pending";
+  let loyaltyPointsAwarded = 0;
+  let loyaltyErrorMessage: string | null = null;
 
-    await updatePosSaleLoyaltySnapshot({
+  try {
+    const service = getServiceSupabase();
+    resolvedTotalCents = await resolvePosSaleTotalCents(service, normalized.saleId, normalized.totalCents);
+    logInfo("Resolved total cents", { saleId: normalized.saleId, resolvedTotalCents });
+
+    logInfo("Resolved customer user", { saleId: normalized.saleId, customerUserId, customerEmail });
+    logInfo("Loyalty processing started", { saleId: normalized.saleId, sourceType: "pos_sale" });
+
+    const { data: loyaltyData, error: loyaltyError } = await processLoyaltyAccrual({
+      sourceType: "pos_sale",
+      sourceId: normalized.saleId,
+      userId: customerUserId,
+      email: customerEmail,
+      amountCents: resolvedTotalCents,
+      metadata: {
+        channel: "physical_store",
+        sale_id: normalized.saleId,
+        order_id: normalized.orderId,
+        seller_id: auth.user.id,
+        payment_method: paymentMethod,
+      },
+    });
+
+    if (loyaltyError) {
+      loyaltyStatus = "error";
+      loyaltyErrorMessage = loyaltyError.message;
+      await updatePosSaleLoyaltySnapshot({
+        saleId: normalized.saleId,
+        userId: customerUserId,
+        status: "error",
+        points: 0,
+        loyaltyError: loyaltyError.message,
+      });
+      logError("Loyalty processing result", { saleId: normalized.saleId, status: "error", loyaltyError });
+    } else {
+      loyaltyStatus = loyaltyData?.status ?? "error";
+      loyaltyPointsAwarded = Number(loyaltyData?.points_awarded ?? 0);
+
+      await updatePosSaleLoyaltySnapshot({
+        saleId: normalized.saleId,
+        userId: loyaltyData?.resolved_user_id ?? customerUserId,
+        status: loyaltyStatus,
+        points: loyaltyPointsAwarded,
+        loyaltyError: loyaltyStatus === "error" ? "Error loyalty no especificado" : null,
+      });
+
+      logInfo("Loyalty processing result", {
+        saleId: normalized.saleId,
+        loyaltyStatus,
+        loyaltyPointsAwarded,
+      });
+    }
+  } catch (postError) {
+    loyaltyStatus = "error";
+    loyaltyErrorMessage = postError instanceof Error ? postError.message : String(postError);
+    logError("Non-fatal post-processing error", {
       saleId: normalized.saleId,
-      userId: loyaltyData?.resolved_user_id ?? customerUserId,
-      status: loyaltyStatus,
-      points: loyaltyPointsAwarded,
-      loyaltyError: loyaltyStatus === "error" ? "Error loyalty no especificado" : null,
+      error: loyaltyErrorMessage,
     });
   }
 
@@ -462,6 +526,7 @@ export async function POST(req: Request) {
       paymentReference: normalized.paymentReference,
       loyaltyStatus,
       loyaltyPointsAwarded,
+      loyaltyError: loyaltyErrorMessage,
     },
     { status: 201 },
   );
