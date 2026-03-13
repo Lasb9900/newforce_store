@@ -6,7 +6,7 @@ export type LoyaltySourceType = "online_order" | "pos_sale";
 
 type LoyaltyAccrualResult = {
   transaction_id: string;
-  status: "pending" | "applied" | "duplicate" | "skipped_no_user" | "skipped_ineligible" | "error";
+  status: "pending" | "applied" | "duplicate" | "skipped_no_user" | "skipped_no_email" | "skipped_ineligible" | "error";
   points_awarded: number;
   resolved_user_id: string | null;
   normalized_email: string | null;

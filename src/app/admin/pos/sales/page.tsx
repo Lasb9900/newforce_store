@@ -5,6 +5,27 @@ function toMoney(cents: number) {
   return new Intl.NumberFormat("es-US", { style: "currency", currency: "USD" }).format(cents / 100);
 }
 
+function formatLoyaltyStatus(status: string | null | undefined, points: number | null | undefined, hasEmail: boolean) {
+  switch (status) {
+    case "applied":
+      return `Aplicado (+${points ?? 0})`;
+    case "duplicate":
+      return "Duplicado (idempotente)";
+    case "skipped_no_user":
+      return "Sin cuenta asociada";
+    case "skipped_no_email":
+      return "Sin email";
+    case "skipped_ineligible":
+      return "No elegible";
+    case "pending":
+      return "Pendiente";
+    case "error":
+      return "Error";
+    default:
+      return hasEmail ? "Sin procesar" : "Sin email";
+  }
+}
+
 export default async function AdminPosSalesPage({
   searchParams,
 }: {
@@ -69,7 +90,7 @@ export default async function AdminPosSalesPage({
                   <td className="p-2">{s.payment_method ?? "—"}</td>
                   <td className="p-2">{s.payment_reference ?? "—"}</td>
                   <td className="p-2">{s.customer_email ?? "—"}</td>
-                  <td className="p-2">{s.loyalty_status ?? "—"}{(s.loyalty_points ?? 0) > 0 ? ` (+${s.loyalty_points} pts)` : ""}</td>
+                  <td className="p-2">{formatLoyaltyStatus(s.loyalty_status, s.loyalty_points, Boolean(s.customer_email))}</td>
                 </tr>
               ))}
             </tbody>

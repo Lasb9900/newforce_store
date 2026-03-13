@@ -1,7 +1,17 @@
 import { requireCustomerPage } from "@/lib/auth";
 
 export default async function AccountOrdersPage() {
-  const { supabase, user } = await requireCustomerPage("/login?next=/account/orders");
+  const { supabase, user, profile } = await requireCustomerPage("/login?next=/account/orders");
+
+  const normalizedProfileEmail = profile?.email?.trim().toLowerCase() ?? null;
+  if (normalizedProfileEmail) {
+    await supabase
+      .from("orders")
+      .update({ user_id: user.id })
+      .eq("channel", "physical_store")
+      .is("user_id", null)
+      .eq("buyer_email", normalizedProfileEmail);
+  }
 
   const { data: orders } = await supabase
     .from("orders")

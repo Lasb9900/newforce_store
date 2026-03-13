@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createPosSaleSchema } from "@/lib/schemas";
 import { requireSellerApi } from "@/lib/auth";
+import { getServiceSupabase } from "@/lib/supabase";
 import { processLoyaltyAccrual } from "@/lib/services/loyalty.service";
 
 type RpcArrayShape = {
@@ -168,7 +169,7 @@ async function normalizeRpcResult(rawData: unknown, supabase: unknown): Promise<
 
   const { data: posSaleRow } = await db
     .from("pos_sales")
-    .select("id,created_at,total,payment_reference")
+    .select("id,order_id,created_at,total,payment_reference")
     .eq("id", candidateId)
     .maybeSingle();
 
@@ -176,7 +177,7 @@ async function normalizeRpcResult(rawData: unknown, supabase: unknown): Promise<
     // We still return success to avoid false 500 + duplicate retries.
     return {
       saleId: String(posSaleRow.id),
-      orderId: null,
+      orderId: (posSaleRow.order_id as string | null) ?? null,
       createdAt: String(posSaleRow.created_at ?? ""),
       totalCents: Number(posSaleRow.total ?? 0),
       pointsEarned: 0,
@@ -268,6 +269,29 @@ export async function POST(req: Request) {
   }
 
   const customerEmail = parsed.data.customerEmail?.trim().toLowerCase() ?? null;
+  let customerId: string | null = null;
+
+  if (customerEmail) {
+    try {
+      const service = getServiceSupabase();
+      const { data: profile, error: profileError } = await service
+        .from("profiles")
+        .select("user_id")
+        .eq("email", customerEmail)
+        .maybeSingle();
+
+      if (profileError) {
+        logError("Customer profile lookup failed", { customerEmail, profileError });
+      }
+
+      customerId = profile?.user_id ?? null;
+    } catch (lookupError) {
+      logError("Customer profile lookup exception", {
+        customerEmail,
+        lookupError: lookupError instanceof Error ? lookupError.message : String(lookupError),
+      });
+    }
+  }
 
   logInfo("Calling transactional RPC create_pos_sale", {
     productId: item.productId,
@@ -282,7 +306,7 @@ export async function POST(req: Request) {
     p_payment_reference: paymentReference,
     p_customer_email: customerEmail,
     p_sold_by: auth.user.id,
-    p_customer_id: null,
+    p_customer_id: customerId,
   });
 
   if (error) {
@@ -343,7 +367,7 @@ export async function POST(req: Request) {
     normalized.totalCents != null
       ? normalized.totalCents
       : await resolveTotalCents(
-          auth.supabase as {
+          auth.supabase as unknown as {
             from: (table: string) => {
               select: (columns: string) => {
                 eq: (column: string, value: string) => {
@@ -369,6 +393,7 @@ export async function POST(req: Request) {
     const { data: loyaltyData, error: loyaltyError } = await processLoyaltyAccrual({
       sourceType: "pos_sale",
       sourceId: normalized.orderId,
+      userId: customerId,
       email: customerEmail,
       amountCents: resolvedTotalCents ?? 0,
       metadata: {
