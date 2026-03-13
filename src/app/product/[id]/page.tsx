@@ -7,7 +7,8 @@ import { StockBadge } from "@/components/StockBadge";
 import { ProductCard } from "@/components/ProductCard";
 import { ProductImage } from "@/components/ProductImage";
 import { getServerSupabase } from "@/lib/supabase";
-import { getCompareAtPriceCents, getDisplayCategory, getDisplayName, getDisplayPriceCents, getPrimaryImage, getStockCount } from "@/lib/catalog-presenter";
+import { getCompareAtPriceCents, getDisplayName, getDisplayPriceCents, getPrimaryImage, getStockCount } from "@/lib/catalog-presenter";
+import { getProductCategoryMeta } from "@/lib/categories";
 
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -27,7 +28,8 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   const compareAt = getCompareAtPriceCents(product, price);
   const stock = getStockCount(product);
   const name = getDisplayName(product);
-  const category = getDisplayCategory(product);
+  const categoryMeta = getProductCategoryMeta(product);
+  const category = categoryMeta.name;
 
   const { data: related } = await sb
     .from("products")
@@ -39,7 +41,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   return (
     <div className="space-y-8">
       <nav className="text-sm text-mutedText">
-        <Link href="/" className="hover:text-brand-primary">Home</Link> / <Link href="/shop" className="hover:text-brand-primary">Shop</Link> / <span>{name}</span>
+        <Link href="/" className="hover:text-brand-primary">Home</Link> / <Link href="/shop" className="hover:text-brand-primary">Shop</Link> / <Link href={`/shop?category=${categoryMeta.slug}`} className="hover:text-brand-primary">{category}</Link> / <span>{name}</span>
       </nav>
 
       <div className="grid gap-6 lg:grid-cols-2">

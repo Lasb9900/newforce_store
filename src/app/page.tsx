@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ProductCard } from "@/components/ProductCard";
-import { getProductsPublic } from "@/lib/catalog";
-import { buildCatalogCategories } from "@/lib/categories";
+import { getFeaturedCategories, getProductsPublic } from "@/lib/catalog";
 
 const benefits = [
   { title: "Secure checkout", description: "Encrypted payment flow with order validation." },
@@ -15,11 +14,7 @@ export default async function Home() {
   const featured = products.filter((product) => product.featured).slice(0, 8);
   const newArrivals = [...products].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 4);
   const deals = products.filter((product) => (product.price_cents ?? 0) > (product.base_price_cents ?? 0)).slice(0, 4);
-
-  const categoryHighlights = buildCatalogCategories(products)
-    .filter((category) => category.productCount > 0)
-    .slice(0, 4);
-
+  const categoryHighlights = await getFeaturedCategories(products, 4);
 
   return (
     <div className="space-y-12">
@@ -38,14 +33,18 @@ export default async function Home() {
           <h2 className="text-2xl font-bold text-brand-ink">Featured categories</h2>
           <Link href="/shop" className="text-sm font-medium text-brand-primary hover:underline">Browse catalog</Link>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {categoryHighlights.map((category) => (
-            <Link key={category.slug} href={`/shop?category=${category.slug}`} className="rounded-xl border border-uiBorder bg-slate-50 px-4 py-6 text-center font-semibold text-slate-700 transition hover:border-brand-primary hover:text-brand-primary">
-              <p>{category.name}</p>
-              <p className="mt-1 text-xs font-medium text-mutedText">{category.productCount} products</p>
-            </Link>
-          ))}
-        </div>
+        {categoryHighlights.length ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {categoryHighlights.map((category) => (
+              <Link key={category.slug} href={`/shop?category=${category.slug}`} className="rounded-xl border border-uiBorder bg-slate-50 px-4 py-6 text-center font-semibold text-slate-700 transition hover:border-brand-primary hover:text-brand-primary">
+                <p>{category.name}</p>
+                <p className="mt-1 text-xs font-medium text-mutedText">{category.productCount} products</p>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-mutedText">Categories will appear automatically as active products are added.</p>
+        )}
       </section>
 
       <section>

@@ -5,10 +5,9 @@ import { FilterDrawer } from "@/components/FilterDrawer";
 import { PromoBanner } from "@/components/PromoBanner";
 import { ShopFilters } from "@/components/ShopFilters";
 import { SortSelect } from "@/components/SortSelect";
-import { buildCatalogCategories, getCategoryBySlug } from "@/lib/categories";
+import { getProductsPublic, getVisibleCategories } from "@/lib/catalog";
+import { getCategoryBySlug } from "@/lib/categories";
 import { applyShopFilters, parseShopFilters } from "@/lib/shop";
-import { getServerSupabase } from "@/lib/supabase";
-import { Product } from "@/lib/types";
 
 export const metadata: Metadata = {
   title: "Shop | Newforce Store",
@@ -41,22 +40,10 @@ export default async function ShopPage({
 }) {
   const params = await searchParams;
   const requestedFilters = parseShopFilters(params);
-  const supabase = await getServerSupabase();
 
-  const productsResult = await supabase
-    .from("products")
-    .select("*, category:categories(*), images:product_images(*), variants:product_variants(*)")
-    .eq("active", true)
-    .order("created_at", { ascending: false });
+  const products = await getProductsPublic();
+  const categories = await getVisibleCategories(products);
 
-  const products = ((productsResult.data ?? []) as Product[]).map((product) => ({
-    ...product,
-    name: product.name ?? "",
-    images: product.images ?? [],
-    variants: product.variants ?? [],
-  }));
-
-  const categories = buildCatalogCategories(products).filter((category) => category.productCount > 0);
   const validCategory = getCategoryBySlug(categories, requestedFilters.category);
   const filters = {
     ...requestedFilters,
