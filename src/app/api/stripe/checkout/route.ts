@@ -1,4 +1,3 @@
-import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { stripeCheckoutSchema } from "@/lib/schemas";
 import { getServerSupabase } from "@/lib/supabase";
@@ -6,6 +5,9 @@ import { stripe } from "@/lib/stripe";
 import { env } from "@/lib/env";
 import { validateCartItems } from "@/lib/checkout";
 import { calculateTaxCents, resolveShippingOption } from "@/lib/shipping";
+import { getShippingOptions } from "@/lib/services/shipping.service";
+import { buildCheckoutPricing } from "@/lib/services/checkout-pricing.service";
+import { buildStripeLineItems } from "@/lib/services/stripe-checkout.service";
 
 export async function POST(req: Request) {
   const parsed = stripeCheckoutSchema.safeParse(await req.json());
@@ -24,14 +26,25 @@ export async function POST(req: Request) {
     } = await sb.auth.getUser();
 
     const validatedCart = await validateCartItems(sb, parsed.data.items);
-    const selectedShipping = resolveShippingOption(validatedCart.subtotal_cents, parsed.data.shipping_option_id);
+    const { options: shippingOptions } = await getShippingOptions({
+      subtotalCents: validatedCart.subtotal_cents,
+      destinationPostalCode: parsed.data.shipping.postal_code,
+      destinationState: parsed.data.shipping.state,
+      destinationCountry: parsed.data.shipping.country,
+      weightGrams: validatedCart.total_weight_grams,
+    });
+
+    const selectedShipping = resolveShippingOption(shippingOptions, parsed.data.shipping_option_id);
     if (!selectedShipping) {
-      return NextResponse.json({ error: "Método de envío inválido" }, { status: 400 });
+      return NextResponse.json({ error: "Selected shipping option is no longer available" }, { status: 400 });
     }
 
-    const shippingCents = selectedShipping.amount_cents;
-    const taxCents = calculateTaxCents();
-    const totalCents = validatedCart.subtotal_cents + shippingCents + taxCents;
+    const pricing = buildCheckoutPricing({
+      cart: validatedCart,
+      shippingCents: selectedShipping.amount_cents,
+      taxCents: calculateTaxCents(),
+      discountCents: 0,
+    });
 
     const { data: order, error: orderError } = await sb
       .from("orders")
@@ -43,10 +56,10 @@ export async function POST(req: Request) {
         email: parsed.data.shipping.email,
         full_name: parsed.data.shipping.full_name,
         phone: parsed.data.shipping.phone,
-        subtotal_cents: validatedCart.subtotal_cents,
-        shipping_cents: shippingCents,
-        tax_cents: taxCents,
-        total_cents: totalCents,
+        subtotal_cents: pricing.subtotal_cents,
+        shipping_cents: pricing.shipping_cents,
+        tax_cents: pricing.tax_cents,
+        total_cents: pricing.total_cents,
         status: "pending",
         payment_status: "pending",
         currency: "USD",
@@ -69,7 +82,7 @@ export async function POST(req: Request) {
       .single();
 
     if (orderError || !order) {
-      return NextResponse.json({ error: orderError?.message ?? "No se pudo crear la orden preliminar" }, { status: 500 });
+      return NextResponse.json({ error: orderError?.message ?? "Unable to create preliminary order" }, { status: 500 });
     }
 
     const { error: orderItemsError } = await sb.from("order_items").insert(
@@ -91,25 +104,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: orderItemsError.message }, { status: 500 });
     }
 
-    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = validatedCart.items.map((item) => ({
-      quantity: item.quantity,
-      price_data: {
-        currency: "usd",
-        unit_amount: item.unit_price_cents,
-        product_data: { name: item.product_name_snapshot },
-      },
-    }));
-
-    if (shippingCents > 0) {
-      lineItems.push({
-        quantity: 1,
-        price_data: {
-          currency: "usd",
-          unit_amount: shippingCents,
-          product_data: { name: selectedShipping.name },
-        },
-      });
-    }
+    const lineItems = buildStripeLineItems({
+      cart: validatedCart,
+      shippingName: selectedShipping.name,
+      shippingCents: pricing.shipping_cents,
+    });
 
     const successUrl = env.STRIPE_SUCCESS_URL ?? `${env.NEXT_PUBLIC_SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = env.STRIPE_CANCEL_URL ?? `${env.NEXT_PUBLIC_SITE_URL}/cancel`;
@@ -141,7 +140,7 @@ export async function POST(req: Request) {
     await sb.from("order_events").insert({ order_id: order.id, event_type: "checkout_session_created", payload: { stripe_session_id: session.id } });
 
     return NextResponse.json({ url: session.url });
-  } catch (error) {
-    return NextResponse.json({ error: (error as Error).message || "Stripe checkout failed" }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Unable to start secure payment" }, { status: 500 });
   }
 }

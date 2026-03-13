@@ -47,6 +47,7 @@ export default function CartPage() {
   const [subtotalCents, setSubtotalCents] = useState(0);
   const [shippingOptions, setShippingOptions] = useState<ShippingOption[]>([]);
   const [selectedShippingId, setSelectedShippingId] = useState<ShippingOption["id"] | "">("");
+  const [shippingSource, setShippingSource] = useState<"UPS_REAL" | "UPS_MOCK" | null>(null);
   const [summaryOpenMobile, setSummaryOpenMobile] = useState(false);
 
   const itemPayload = useMemo(() => mapItemsPayload(items), [items]);
@@ -94,6 +95,7 @@ export default function CartPage() {
   useEffect(() => {
     setShippingOptions([]);
     setSelectedShippingId("");
+    setShippingSource(null);
   }, [shipping.address_line_1, shipping.city, shipping.state, shipping.postal_code, itemPayload]);
 
   const selectedShipping = shippingOptions.find((option) => option.id === selectedShippingId) ?? null;
@@ -166,7 +168,8 @@ export default function CartPage() {
       const rates = await getShippingRatesRequest(itemPayload, sanitized);
       setShippingOptions(rates.shipping_options ?? []);
       setSelectedShippingId(rates.shipping_options?.[0]?.id ?? "");
-      setShippingMessage(null);
+      setShippingSource(rates.source ?? null);
+      setShippingMessage(rates.source === "UPS_MOCK" ? "Showing fallback shipping rates while live carrier rates are unavailable." : null);
     } catch {
       setShippingMessage("We couldn't calculate shipping rates right now. Please review your address and retry.");
     } finally {
@@ -242,7 +245,7 @@ export default function CartPage() {
             selectedId={selectedShippingId}
             loading={loadingRates}
             disabled={!itemPayload.length}
-            message={shippingMessage}
+            message={shippingMessage ?? (shippingSource === "UPS_REAL" ? "Live UPS rates" : null)}
             onCalculate={handleCalculateShipping}
             onSelect={setSelectedShippingId}
           />

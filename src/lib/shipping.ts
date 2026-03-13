@@ -6,7 +6,7 @@ export type ShippingOption = {
   amount_cents: number;
   estimated_days: string;
   label?: "Best value" | "Fastest" | "Cheapest";
-  provider: "UPS_MOCK";
+  provider: "UPS_REAL" | "UPS_MOCK";
 };
 
 export function buildShippingOptions(subtotalCents: number): ShippingOption[] {
@@ -41,8 +41,8 @@ export function buildShippingOptions(subtotalCents: number): ShippingOption[] {
   ];
 }
 
-export function resolveShippingOption(subtotalCents: number, selectedId: ShippingOptionId) {
-  return buildShippingOptions(subtotalCents).find((option) => option.id === selectedId) ?? null;
+export function resolveShippingOption(options: ShippingOption[], selectedId: ShippingOptionId) {
+  return options.find((option) => option.id === selectedId) ?? null;
 }
 
 export function calculateTaxCents() {

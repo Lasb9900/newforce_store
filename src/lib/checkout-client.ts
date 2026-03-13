@@ -37,7 +37,7 @@ export async function getShippingRatesRequest(items: CheckoutItemInput[], shippi
     throw new Error(userMessageFromStatus(response.status, "Unable to calculate shipping. Verify your address and retry."));
   }
 
-  return json as { shipping_options: ShippingOption[] };
+  return json as { shipping_options: ShippingOption[]; source?: "UPS_REAL" | "UPS_MOCK" };
 }
 
 export async function createStripeCheckoutRequest(payload: {

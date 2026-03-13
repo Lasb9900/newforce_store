@@ -19,6 +19,7 @@ export type ShippingOption = {
   amount_cents: number;
   estimated_days: string;
   label?: "Best value" | "Fastest" | "Cheapest";
+  provider?: "UPS_REAL" | "UPS_MOCK";
 };
 
 export type CheckoutItemInput = Pick<CartItem, "productId" | "variantId" | "qty">;

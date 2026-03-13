@@ -1,6 +1,8 @@
 "use client";
 
-import { getAddressSuggestions } from "@/lib/us-address";
+import { useEffect, useMemo, useState } from "react";
+import { AddressSuggestion } from "@/lib/us-address";
+import { autocompleteUsAddress } from "@/lib/services/address-autocomplete.service";
 
 type Props = {
   value: string;
@@ -9,7 +11,22 @@ type Props = {
 };
 
 export function AddressAutocomplete({ value, onChange, onSelectSuggestion }: Props) {
-  const suggestions = getAddressSuggestions(value);
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const next = await autocompleteUsAddress(value);
+      if (!cancelled) setSuggestions(next);
+    }, 180);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [value]);
+
+  const hasSuggestions = useMemo(() => suggestions.length > 0, [suggestions.length]);
 
   return (
     <div>
@@ -21,7 +38,7 @@ export function AddressAutocomplete({ value, onChange, onSelectSuggestion }: Pro
         onChange={(e) => onChange(e.target.value)}
         placeholder="Street and number"
       />
-      {suggestions.length ? (
+      {hasSuggestions ? (
         <ul className="mt-2 rounded-lg border border-uiBorder bg-white p-1 text-sm shadow-sm" role="listbox" aria-label="Address suggestions">
           {suggestions.map((s, index) => (
             <li key={`${s.line1}-${s.city}-${index}`}>
