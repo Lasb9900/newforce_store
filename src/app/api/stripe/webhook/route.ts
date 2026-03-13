@@ -84,6 +84,15 @@ export async function POST(req: Request) {
     payload: { stripe_session_id: session.id },
   });
 
+
+  if (order.user_id) {
+    const { data: userCart } = await admin.from("carts").select("id").eq("user_id", order.user_id).maybeSingle();
+    if (userCart?.id) {
+      await admin.from("cart_items").delete().eq("cart_id", userCart.id);
+      await admin.from("carts").update({ updated_at: new Date().toISOString() }).eq("id", userCart.id);
+    }
+  }
+
   await processLoyaltyAccrual({
     sourceType: "online_order",
     sourceId: order.id,
