@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Poppins } from "next/font/google";
 import { AuthNavControls } from "@/components/nav/AuthNavControls";
+import { AuthDebugPanel } from "@/components/nav/AuthDebugPanel";
 
 export const metadata: Metadata = {
   title: "Newforce Store | Retail Electronics & Home",
@@ -45,6 +46,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           </nav>
         </header>
         <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+        <AuthDebugPanel />
       </body>
     </html>
   );

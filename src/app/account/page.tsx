@@ -15,6 +15,14 @@ export default async function AccountPage() {
   const { supabase, user, profile } = await requireCustomerPage("/login?next=/account");
   const normalizedProfileEmail = profile?.email?.trim().toLowerCase() ?? null;
 
+  console.info("[ACCOUNT_DEBUG] server-session", {
+    route: "/account",
+    render: "server",
+    authenticated: !!user,
+    userId: user?.id ?? null,
+  });
+
+
   const [loyaltyResult, { data: onlineOrders }, posQueryByUser] = await Promise.all([
     supabase.from("loyalty_transactions").select("points_delta").eq("user_id", user.id).eq("status", "applied"),
     supabase

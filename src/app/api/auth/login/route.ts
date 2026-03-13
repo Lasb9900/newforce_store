@@ -27,6 +27,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No se pudo iniciar sesión" }, { status: 500 });
     }
 
+    console.info("[LOGIN_DEBUG] server-login-success", { userId: data.user.id, render: "server" });
     return NextResponse.json({ ok: true, userId: data.user.id });
   } catch (error) {
     const message = toErrorMessage(error);

@@ -15,6 +15,7 @@ export async function POST() {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
+    console.info("[AUTH_DEBUG] server-logout", { render: "server" });
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: toErrorMessage(error) }, { status: 500 });
