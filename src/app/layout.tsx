@@ -3,9 +3,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { Poppins } from "next/font/google";
-import { CartBadgeLink } from "@/components/nav/CartBadgeLink";
-import { WishlistBadgeLink } from "@/components/nav/WishlistBadgeLink";
-import { getServerSupabase } from "@/lib/supabase";
+import { AuthNavControls } from "@/components/nav/AuthNavControls";
 
 export const metadata: Metadata = {
   title: "Newforce Store | Retail Electronics & Home",
@@ -19,11 +17,6 @@ const poppins = Poppins({
 });
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const supabase = await getServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   return (
     <html lang="es">
       <body className={`${poppins.className} min-h-screen bg-surfaceMuted text-brand-ink`}>
@@ -47,9 +40,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
             <div className="ml-auto flex items-center gap-1 font-medium text-brand-ink">
               <Link href="/" className="rounded px-3 py-2 hover:bg-slate-100">Home</Link>
               <Link href="/shop" className="rounded px-3 py-2 hover:bg-slate-100">Shop</Link>
-              <WishlistBadgeLink />
-              <CartBadgeLink />
-              {user ? <Link href="/account" className="rounded px-3 py-2 hover:bg-slate-100">Cuenta</Link> : <Link href="/login" className="rounded px-3 py-2 hover:bg-slate-100">Login</Link>}
+              <AuthNavControls />
             </div>
           </nav>
         </header>

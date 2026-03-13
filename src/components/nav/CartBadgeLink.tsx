@@ -3,16 +3,19 @@
 import Link from "next/link";
 import { useEffect } from "react";
 import { useCartStore } from "@/lib/cart-store";
+import { useAuthStore } from "@/lib/auth-store";
 
 export function CartBadgeLink() {
   const items = useCartStore((state) => state.items);
   const initialized = useCartStore((state) => state.initialized);
   const initializing = useCartStore((state) => state.initializing);
   const initialize = useCartStore((state) => state.initialize);
+  const initAuth = useAuthStore((state) => state.initialize);
 
   useEffect(() => {
+    void initAuth();
     void initialize();
-  }, [initialize]);
+  }, [initAuth, initialize]);
 
   const count = items.reduce((sum, item) => sum + item.qty, 0);
   const showCount = initialized && !initializing;

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useWishlistStore } from "@/lib/wishlist-store";
+import { useAuthStore } from "@/lib/auth-store";
 
 type Props = { productId: string };
 
@@ -10,11 +11,13 @@ export function WishlistToggleButton({ productId }: Props) {
   const isInWishlist = useWishlistStore((state) => state.isInWishlist(productId));
   const toggle = useWishlistStore((state) => state.toggle);
   const syncing = useWishlistStore((state) => state.syncing);
-  const currentUserId = useWishlistStore((state) => state.currentUserId);
+  const currentUserId = useAuthStore((state) => state.userId);
+  const initAuth = useAuthStore((state) => state.initialize);
 
   useEffect(() => {
+    void initAuth();
     void initialize();
-  }, [initialize]);
+  }, [initAuth, initialize]);
 
   return (
     <button

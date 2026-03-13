@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { getBrowserSupabase } from "@/lib/supabase-browser";
+import { useAuthStore } from "@/lib/auth-store";
 
 type WishlistNotice = { type: "info" | "warning"; message: string };
 
@@ -31,6 +31,7 @@ type WishlistState = {
   dismissNotice: () => void;
 };
 
+const GUEST_WISHLIST_KEY = "wishlist:guest";
 let authSubscriptionBound = false;
 let wishlistQueue = Promise.resolve();
 
@@ -39,10 +40,29 @@ function enqueue(task: () => Promise<void>) {
   return wishlistQueue;
 }
 
-async function getCurrentUserId() {
-  const supabase = getBrowserSupabase();
-  const { data } = await supabase.auth.getUser();
-  return data.user?.id ?? null;
+function readGuestWishlist() {
+  if (typeof window === "undefined") return [] as string[];
+  try {
+    const raw = localStorage.getItem(GUEST_WISHLIST_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as string[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistGuestWishlist(productIds: string[]) {
+  if (typeof window === "undefined") return;
+  if (!productIds.length) {
+    localStorage.removeItem(GUEST_WISHLIST_KEY);
+    return;
+  }
+  localStorage.setItem(GUEST_WISHLIST_KEY, JSON.stringify(Array.from(new Set(productIds))));
+}
+
+function guestItemsFromIds(ids: string[]): WishlistItem[] {
+  return ids.map((productId) => ({ id: `guest:${productId}`, product_id: productId, products: null }));
 }
 
 async function fetchWishlist() {
@@ -50,6 +70,16 @@ async function fetchWishlist() {
   if (!response.ok) throw new Error("Failed to load wishlist");
   const json = (await response.json()) as { data?: WishlistItem[] };
   return json.data ?? [];
+}
+
+async function addToServerWishlist(productId: string) {
+  const response = await fetch(`/api/me/wishlist/${productId}`, { method: "POST" });
+  if (!response.ok) throw new Error("Failed to add wishlist item");
+}
+
+async function removeFromServerWishlist(productId: string) {
+  const response = await fetch(`/api/me/wishlist/${productId}`, { method: "DELETE" });
+  if (!response.ok) throw new Error("Failed to remove wishlist item");
 }
 
 export const useWishlistStore = create<WishlistState>((set, get) => ({
@@ -66,31 +96,47 @@ export const useWishlistStore = create<WishlistState>((set, get) => ({
     set({ initializing: true, syncing: true });
 
     const applyForUser = async (userId: string | null) => {
+      set({ currentUserId: userId, syncing: true, items: [] });
       try {
         if (!userId) {
-          set({ currentUserId: null, items: [], notice: { type: "info", message: "Log in to save products to your wishlist." } });
+          const guestIds = readGuestWishlist();
+          set({ items: guestItemsFromIds(guestIds), notice: null });
           return;
         }
 
-        const items = await fetchWishlist();
-        set({ currentUserId: userId, items, notice: null });
+        let items = await fetchWishlist();
+        const guestIds = readGuestWishlist();
+
+        if (guestIds.length > 0) {
+          const existing = new Set(items.map((item) => item.product_id));
+          for (const productId of guestIds) {
+            if (existing.has(productId)) continue;
+            await addToServerWishlist(productId);
+          }
+          localStorage.removeItem(GUEST_WISHLIST_KEY);
+          items = await fetchWishlist();
+          set({ notice: { type: "info", message: "Guest wishlist merged into your account." } });
+        } else {
+          set({ notice: null });
+        }
+
+        set({ items });
       } catch {
-        set({ currentUserId: userId, items: [], notice: { type: "warning", message: "Could not sync your wishlist." } });
+        const fallback = userId ? [] : guestItemsFromIds(readGuestWishlist());
+        set({ items: fallback, notice: { type: "warning", message: "Could not sync your wishlist." } });
       } finally {
         set({ syncing: false });
       }
     };
 
-    const userId = await getCurrentUserId();
-    await applyForUser(userId);
+    const auth = useAuthStore.getState();
+    await auth.initialize();
+    await applyForUser(useAuthStore.getState().userId);
 
     if (!authSubscriptionBound) {
-      const supabase = getBrowserSupabase();
-      supabase.auth.onAuthStateChange(async (_event, session) => {
-        const nextUserId = session?.user?.id ?? null;
-        if (nextUserId === get().currentUserId) return;
-        set({ syncing: true });
-        await applyForUser(nextUserId);
+      useAuthStore.subscribe((state, prev) => {
+        if (state.userId === prev.userId) return;
+        void applyForUser(state.userId);
       });
       authSubscriptionBound = true;
     }
@@ -101,17 +147,21 @@ export const useWishlistStore = create<WishlistState>((set, get) => ({
   toggle: async (productId: string) =>
     enqueue(async () => {
       const { currentUserId } = get();
-      if (!currentUserId) {
-        set({ notice: { type: "info", message: "Please log in to use wishlist." } });
-        return;
-      }
-
       set({ syncing: true });
       try {
         const inWishlist = get().items.some((item) => item.product_id === productId);
-        const method = inWishlist ? "DELETE" : "POST";
-        const response = await fetch(`/api/me/wishlist/${productId}`, { method });
-        if (!response.ok) throw new Error("Wishlist update failed");
+
+        if (!currentUserId) {
+          const ids = new Set(readGuestWishlist());
+          if (inWishlist) ids.delete(productId);
+          else ids.add(productId);
+          persistGuestWishlist(Array.from(ids));
+          set({ items: guestItemsFromIds(Array.from(ids)), notice: null });
+          return;
+        }
+
+        if (inWishlist) await removeFromServerWishlist(productId);
+        else await addToServerWishlist(productId);
 
         const items = await fetchWishlist();
         set({ items, notice: null });

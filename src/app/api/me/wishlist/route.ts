@@ -16,9 +16,12 @@ export async function GET() {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const filtered = (data ?? []).filter((item) => {
+  const normalized = (data ?? []).flatMap((item) => {
     const product = Array.isArray(item.products) ? item.products[0] : item.products;
-    return product?.active !== false;
+    if (!product || product.active === false) return [];
+
+    return [{ ...item, products: { id: product.id, name: product.name, image_url: product.image_url, base_price_cents: product.base_price_cents } }];
   });
-  return NextResponse.json({ data: filtered });
+
+  return NextResponse.json({ data: normalized });
 }

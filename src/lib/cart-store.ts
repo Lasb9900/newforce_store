@@ -1,8 +1,8 @@
 "use client";
 
 import { create } from "zustand";
-import { getBrowserSupabase } from "@/lib/supabase-browser";
 import { CartItem } from "@/lib/types";
+import { useAuthStore } from "@/lib/auth-store";
 
 type CartNotice = { type: "info" | "warning"; message: string };
 
@@ -55,12 +55,6 @@ function enqueueOperation(task: () => Promise<void>) {
   return operationQueue;
 }
 
-async function getCurrentUserId() {
-  const supabase = getBrowserSupabase();
-  const { data } = await supabase.auth.getUser();
-  return data.user?.id ?? null;
-}
-
 async function fetchServerCart() {
   const response = await fetch("/api/cart", { cache: "no-store" });
   if (!response.ok) throw new Error("Failed to load account cart");
@@ -107,10 +101,10 @@ export const useCartStore = create<CartState>((set, get) => ({
     set({ initializing: true });
 
     const applyForUser = async (nextUserId: string | null) => {
-      set({ syncing: true });
+      set({ syncing: true, currentUserId: nextUserId, items: [] });
       try {
         if (!nextUserId) {
-          set({ items: readGuestCart(), currentUserId: null, notice: null });
+          set({ items: readGuestCart(), notice: null });
           return;
         }
 
@@ -118,29 +112,28 @@ export const useCartStore = create<CartState>((set, get) => ({
         if (guestItems.length) {
           const merged = await mergeGuestIntoServer(guestItems);
           localStorage.removeItem(GUEST_KEY);
-          set({ items: merged.data, currentUserId: nextUserId, notice: merged.notices?.[0] ?? null });
+          set({ items: merged.data, notice: merged.notices?.[0] ?? null });
           return;
         }
 
         const serverCart = await fetchServerCart();
-        set({ items: serverCart.data, currentUserId: nextUserId, notice: serverCart.notices?.[0] ?? null });
+        set({ items: serverCart.data, notice: serverCart.notices?.[0] ?? null });
       } catch {
-        set({ items: nextUserId ? [] : readGuestCart(), currentUserId: nextUserId, notice: { type: "warning", message: "Could not sync your cart. Please retry." } });
+        set({ items: nextUserId ? [] : readGuestCart(), notice: { type: "warning", message: "Could not sync your cart. Please retry." } });
       } finally {
         set({ syncing: false });
       }
     };
 
-    const userId = await getCurrentUserId();
+    const auth = useAuthStore.getState();
+    await auth.initialize();
+    const userId = useAuthStore.getState().userId;
     await applyForUser(userId);
 
     if (!authSubscriptionBound) {
-      const supabase = getBrowserSupabase();
-      supabase.auth.onAuthStateChange(async (_event, session) => {
-        const nextUserId = session?.user?.id ?? null;
-        const currentUserId = get().currentUserId;
-        if (nextUserId === currentUserId) return;
-        await applyForUser(nextUserId);
+      useAuthStore.subscribe((state, prev) => {
+        if (state.userId === prev.userId) return;
+        void applyForUser(state.userId);
       });
       authSubscriptionBound = true;
     }
