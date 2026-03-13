@@ -5,7 +5,8 @@ import { FilterDrawer } from "@/components/FilterDrawer";
 import { PromoBanner } from "@/components/PromoBanner";
 import { ShopFilters } from "@/components/ShopFilters";
 import { SortSelect } from "@/components/SortSelect";
-import { applyShopFilters, parseShopFilters, productCategory } from "@/lib/shop";
+import { buildCatalogCategories, getCategoryBySlug } from "@/lib/categories";
+import { applyShopFilters, parseShopFilters } from "@/lib/shop";
 import { getServerSupabase } from "@/lib/supabase";
 import { Product } from "@/lib/types";
 
@@ -14,10 +15,13 @@ export const metadata: Metadata = {
   description: "Browse electronics and home products with smart filters and secure checkout.",
 };
 
-function activeFilterChips(filters: ReturnType<typeof parseShopFilters>) {
+function activeFilterChips(
+  filters: ReturnType<typeof parseShopFilters>,
+  categoryLabel: string | null,
+) {
   const chips: Array<{ label: string; href: string }> = [];
   if (filters.q) chips.push({ label: `Search: ${filters.q}`, href: "/shop" });
-  if (filters.category) chips.push({ label: `Category: ${filters.category}`, href: "/shop" });
+  if (filters.category) chips.push({ label: `Category: ${categoryLabel ?? filters.category}`, href: "/shop" });
   if (filters.minPrice || filters.maxPrice) {
     chips.push({
       label: `Price: ${filters.minPrice ? `$${filters.minPrice / 100}` : "$0"} - ${filters.maxPrice ? `$${filters.maxPrice / 100}` : "Any"}`,
@@ -36,7 +40,7 @@ export default async function ShopPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const filters = parseShopFilters(params);
+  const requestedFilters = parseShopFilters(params);
   const supabase = await getServerSupabase();
 
   const productsResult = await supabase
@@ -52,17 +56,16 @@ export default async function ShopPage({
     variants: product.variants ?? [],
   }));
 
-  const categories = Array.from(
-    new Map(
-      products.map((product) => {
-        const slug = productCategory(product);
-        return [slug, { slug, name: product.category?.name ?? product.department ?? "General" }];
-      }),
-    ).values(),
-  );
+  const categories = buildCatalogCategories(products).filter((category) => category.productCount > 0);
+  const validCategory = getCategoryBySlug(categories, requestedFilters.category);
+  const filters = {
+    ...requestedFilters,
+    category: validCategory?.slug ?? "",
+  };
 
   const filteredProducts = applyShopFilters(products, filters);
-  const chips = activeFilterChips(filters);
+  const chips = activeFilterChips(filters, validCategory?.name ?? null);
+  const categoryWarning = requestedFilters.category && !validCategory;
 
   return (
     <div className="space-y-6">
@@ -95,6 +98,12 @@ export default async function ShopPage({
           {filters.featured ? <input type="hidden" name="featured" value="true" /> : null}
           <button className="btn-primary text-sm">Search</button>
         </form>
+
+        {categoryWarning ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            The selected category is unavailable right now. Showing all products instead.
+          </div>
+        ) : null}
 
         {chips.length ? (
           <div className="mt-3 flex flex-wrap gap-2">

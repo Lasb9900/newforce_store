@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ProductCard } from "@/components/ProductCard";
 import { getProductsPublic } from "@/lib/catalog";
+import { buildCatalogCategories } from "@/lib/categories";
 
 const benefits = [
   { title: "Secure checkout", description: "Encrypted payment flow with order validation." },
@@ -15,12 +16,10 @@ export default async function Home() {
   const newArrivals = [...products].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 4);
   const deals = products.filter((product) => (product.price_cents ?? 0) > (product.base_price_cents ?? 0)).slice(0, 4);
 
-  const categoryHighlights = [
-    { label: "Kitchen", href: "/shop?category=kitchen" },
-    { label: "Audio", href: "/shop?category=audio" },
-    { label: "Home Comfort", href: "/shop?category=home-comfort" },
-    { label: "Smart Tech", href: "/shop?category=smart-tech" },
-  ];
+  const categoryHighlights = buildCatalogCategories(products)
+    .filter((category) => category.productCount > 0)
+    .slice(0, 4);
+
 
   return (
     <div className="space-y-12">
@@ -41,8 +40,9 @@ export default async function Home() {
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {categoryHighlights.map((category) => (
-            <Link key={category.label} href={category.href} className="rounded-xl border border-uiBorder bg-slate-50 px-4 py-6 text-center font-semibold text-slate-700 transition hover:border-brand-primary hover:text-brand-primary">
-              {category.label}
+            <Link key={category.slug} href={`/shop?category=${category.slug}`} className="rounded-xl border border-uiBorder bg-slate-50 px-4 py-6 text-center font-semibold text-slate-700 transition hover:border-brand-primary hover:text-brand-primary">
+              <p>{category.name}</p>
+              <p className="mt-1 text-xs font-medium text-mutedText">{category.productCount} products</p>
             </Link>
           ))}
         </div>

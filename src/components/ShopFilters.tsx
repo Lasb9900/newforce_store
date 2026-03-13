@@ -1,7 +1,8 @@
 import Link from "next/link";
+import { formatCategoryName } from "@/lib/categories";
 
 type ShopFiltersProps = {
-  categories: Array<{ slug: string; name: string }>;
+  categories: Array<{ slug: string; name: string; productCount: number }>;
   current: {
     category: string;
     minPrice: number | null;
@@ -14,14 +15,6 @@ type ShopFiltersProps = {
   };
   className?: string;
 };
-
-function pretty(value: string) {
-  return value
-    .replaceAll(/[_-]+/g, " ")
-    .replaceAll(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
 
 export function ShopFilters({ categories, current, className }: ShopFiltersProps) {
   return (
@@ -38,7 +31,7 @@ export function ShopFilters({ categories, current, className }: ShopFiltersProps
             <select name="category" defaultValue={current.category} className="w-full rounded-lg border border-uiBorder bg-white px-3 py-2">
               <option value="">All categories</option>
               {categories.map((category) => (
-                <option key={category.slug} value={category.slug}>{pretty(category.name)}</option>
+                <option key={category.slug} value={category.slug}>{formatCategoryName(category.name)} ({category.productCount})</option>
               ))}
             </select>
           </div>

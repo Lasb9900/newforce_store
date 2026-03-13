@@ -1,4 +1,5 @@
 import { Product } from "@/lib/types";
+import { getProductCategoryMeta, normalizeCategorySlug } from "@/lib/categories";
 
 export const SORT_OPTIONS = [
   { value: "featured", label: "Featured" },
@@ -26,7 +27,7 @@ export function productPrice(product: Product) {
 }
 
 export function productCategory(product: Product) {
-  return product.category?.slug ?? product.department?.toLowerCase().replaceAll(/\s+/g, "-") ?? "uncategorized";
+  return getProductCategoryMeta(product).slug;
 }
 
 export function parseShopFilters(params: Record<string, string | string[] | undefined>): ShopFilters {
@@ -40,7 +41,7 @@ export function parseShopFilters(params: Record<string, string | string[] | unde
 
   return {
     q: value("q"),
-    category: value("category"),
+    category: normalizeCategorySlug(value("category")),
     minPrice: Number.isFinite(minPriceRaw) && minPriceRaw > 0 ? Math.round(minPriceRaw * 100) : null,
     maxPrice: Number.isFinite(maxPriceRaw) && maxPriceRaw > 0 ? Math.round(maxPriceRaw * 100) : null,
     stock: value("stock") === "out" ? "out" : value("stock") === "in" ? "in" : "all",
