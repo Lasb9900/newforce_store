@@ -29,7 +29,6 @@ type RpcArrayShape = {
 
 type PayloadBaseShape = {
   saleId: string | null;
-  orderId: string | null;
   createdAt: string | null;
   totalCents: number | null;
   pointsEarned: number;
@@ -38,7 +37,6 @@ type PayloadBaseShape = {
 
 type NormalizedSaleResult = {
   saleId: string;
-  orderId: string | null;
   createdAt: string | null;
   totalCents: number | null;
   pointsEarned: number;
@@ -105,7 +103,7 @@ function pickRpcObject(rawData: unknown): RpcArrayShape | null {
 }
 
 function extractCandidateIds(payload: RpcArrayShape | null) {
-  if (!payload) return { saleId: null as string | null, orderId: null as string | null };
+  if (!payload) return { saleId: null as string | null };
 
   const saleId =
     payload.sale_id ??
@@ -116,18 +114,16 @@ function extractCandidateIds(payload: RpcArrayShape | null) {
     payload.data?.pos_sale_id ??
     null;
 
-  const orderId = payload.order_id ?? payload.data?.order_id ?? null;
-  return { saleId, orderId };
+  return { saleId };
 }
 
 function extractBaseFromPayload(rawData: unknown): PayloadBaseShape {
   const payload = pickRpcObject(rawData);
-  const { saleId, orderId } = extractCandidateIds(payload);
+  const { saleId } = extractCandidateIds(payload);
   const totalCandidate = payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? null;
 
   return {
     saleId,
-    orderId,
     createdAt: payload?.created_at ?? payload?.data?.created_at ?? null,
     totalCents: totalCandidate != null ? Number(totalCandidate) : null,
     pointsEarned: Number(payload?.points_earned ?? 0),
@@ -218,7 +214,6 @@ async function normalizeRpcResult(
     if (row) {
       return {
         saleId: row.saleId,
-        orderId: null,
         createdAt: payload?.created_at ?? payload?.data?.created_at ?? row.createdAt,
         totalCents: payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? row.totalCents,
         pointsEarned: payload?.points_earned ?? 0,
@@ -233,7 +228,6 @@ async function normalizeRpcResult(
     logInfo("normalizeRpcResult fallback hit", { fallbackSaleId: fallbackRow.saleId });
     return {
       saleId: fallbackRow.saleId,
-      orderId: null,
       createdAt: payload?.created_at ?? payload?.data?.created_at ?? fallbackRow.createdAt,
       totalCents: payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? fallbackRow.totalCents,
       pointsEarned: payload?.points_earned ?? 0,
@@ -374,7 +368,6 @@ export async function POST(req: Request) {
     base.saleId
       ? {
           saleId: base.saleId,
-          orderId: null,
           createdAt: base.createdAt,
           totalCents: base.totalCents,
           pointsEarned: base.pointsEarned,
@@ -425,7 +418,7 @@ export async function POST(req: Request) {
     logInfo("Resolved customer user", { saleId: normalized.saleId, customerUserId, customerEmail });
     logInfo("Loyalty processing started", { saleId: normalized.saleId, sourceType: "pos_sale" });
 
-    const { data: loyaltyData, error: loyaltyError } = await processLoyaltyAccrual({
+    const loyaltyResult = await processLoyaltyAccrual({
       sourceType: "pos_sale",
       sourceId: normalized.saleId,
       userId: customerUserId,
@@ -439,35 +432,24 @@ export async function POST(req: Request) {
       },
     });
 
-    if (loyaltyError) {
-      loyaltyStatus = "error";
-      loyaltyErrorMessage = loyaltyError.message;
-      await updatePosSaleLoyaltySnapshot({
-        saleId: normalized.saleId,
-        userId: customerUserId,
-        status: "error",
-        points: 0,
-        loyaltyError: loyaltyError.message,
-      });
-      logError("Loyalty processing result", { saleId: normalized.saleId, status: "error", loyaltyError });
-    } else {
-      loyaltyStatus = loyaltyData?.status ?? "error";
-      loyaltyPointsAwarded = Number(loyaltyData?.points_awarded ?? 0);
+    loyaltyStatus = loyaltyResult.status ?? "error";
+    loyaltyPointsAwarded = Number(loyaltyResult.pointsAwarded ?? 0);
+    loyaltyErrorMessage = loyaltyResult.error ?? null;
 
-      await updatePosSaleLoyaltySnapshot({
-        saleId: normalized.saleId,
-        userId: loyaltyData?.resolved_user_id ?? customerUserId,
-        status: loyaltyStatus,
-        points: loyaltyPointsAwarded,
-        loyaltyError: loyaltyStatus === "error" ? "Error loyalty no especificado" : null,
-      });
+    await updatePosSaleLoyaltySnapshot({
+      saleId: normalized.saleId,
+      userId: customerUserId,
+      status: loyaltyStatus,
+      points: loyaltyPointsAwarded,
+      loyaltyError: loyaltyErrorMessage,
+    });
 
-      logInfo("Loyalty processing result", {
-        saleId: normalized.saleId,
-        loyaltyStatus,
-        loyaltyPointsAwarded,
-      });
-    }
+    logInfo("Loyalty processing result", {
+      saleId: normalized.saleId,
+      loyaltyStatus,
+      loyaltyPointsAwarded,
+      loyaltyErrorMessage,
+    });
   } catch (postError) {
     loyaltyStatus = "error";
     loyaltyErrorMessage = postError instanceof Error ? postError.message : String(postError);
