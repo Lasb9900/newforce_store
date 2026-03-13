@@ -13,6 +13,8 @@ type AddToCartButtonProps = {
 
 export function AddToCartButton({ productId, name, unitPriceCents, imageUrl, stock }: AddToCartButtonProps) {
   const addItem = useCartStore((state) => state.addItem);
+  const initialize = useCartStore((state) => state.initialize);
+  const syncing = useCartStore((state) => state.syncing);
   const [added, setAdded] = useState(false);
 
   const outOfStock = stock <= 0;
@@ -21,10 +23,11 @@ export function AddToCartButton({ productId, name, unitPriceCents, imageUrl, sto
   return (
     <button
       type="button"
-      disabled={outOfStock || priceUnavailable}
+      disabled={outOfStock || priceUnavailable || syncing}
       className="btn-primary w-full text-sm disabled:cursor-not-allowed disabled:opacity-60"
-      onClick={() => {
-        addItem({
+      onClick={async () => {
+        await initialize();
+        await addItem({
           productId,
           qty: 1,
           name,
@@ -36,7 +39,7 @@ export function AddToCartButton({ productId, name, unitPriceCents, imageUrl, sto
         setTimeout(() => setAdded(false), 1400);
       }}
     >
-      {outOfStock ? "Out of stock" : priceUnavailable ? "Price pending" : added ? "Added ✓" : "Add to cart"}
+      {outOfStock ? "Out of stock" : priceUnavailable ? "Price pending" : added ? "Added ✓" : syncing ? "Updating..." : "Add to cart"}
     </button>
   );
 }

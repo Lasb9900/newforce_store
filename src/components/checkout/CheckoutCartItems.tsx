@@ -1,15 +1,18 @@
 import Link from "next/link";
 import { CartItem } from "@/lib/types";
 import { CartItemRow } from "@/components/CartItemRow";
+import { cartItemKey } from "@/lib/cart-store";
 
 export function CheckoutCartItems({
   items,
   onQty,
   onRemove,
+  disabled,
 }: {
   items: CartItem[];
-  onQty: (index: number, qty: number) => void;
-  onRemove: (index: number) => void;
+  onQty: (itemKey: string, qty: number) => void;
+  onRemove: (itemKey: string) => void;
+  disabled?: boolean;
 }) {
   if (!items.length) {
     return (
@@ -25,9 +28,10 @@ export function CheckoutCartItems({
     <section className="space-y-3 rounded-2xl border border-uiBorder bg-surface p-4 shadow-sm">
       <h2 className="text-lg font-semibold">1. Cart items</h2>
       <div className="space-y-2">
-        {items.map((item, index) => (
-          <CartItemRow key={`${item.productId}-${item.variantId}-${index}`} item={item} onQty={(qty) => onQty(index, qty)} onRemove={() => onRemove(index)} />
-        ))}
+        {items.map((item) => {
+          const key = cartItemKey(item);
+          return <CartItemRow key={key} item={item} disabled={disabled} onQty={(qty) => onQty(key, qty)} onRemove={() => onRemove(key)} />;
+        })}
       </div>
     </section>
   );
