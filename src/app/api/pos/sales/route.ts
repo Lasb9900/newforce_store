@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createPosSaleSchema } from "@/lib/schemas";
 import { requireSellerApi } from "@/lib/auth";
-import { getServiceSupabase } from "@/lib/supabase";
+import { processLoyaltyAccrual } from "@/lib/services/loyalty.service";
 
 type RpcArrayShape = {
   success?: boolean;
@@ -267,36 +267,12 @@ export async function POST(req: Request) {
     });
   }
 
-  let service: ReturnType<typeof getServiceSupabase> | null = null;
-  try {
-    service = getServiceSupabase();
-  } catch {
-    service = null;
-  }
-
-  let customerId: string | null = null;
-  let customerEmail: string | null = parsed.data.customerEmail ?? null;
-
-  if (parsed.data.customerEmail && service) {
-    const { data: profile, error: profileError } = await service
-      .from("profiles")
-      .select("user_id,email")
-      .ilike("email", parsed.data.customerEmail)
-      .maybeSingle();
-
-    if (profileError) {
-      logError("Failed customer profile lookup", { profileError });
-    }
-
-    customerId = profile?.user_id ?? null;
-    customerEmail = profile?.email ?? parsed.data.customerEmail;
-  }
+  const customerEmail = parsed.data.customerEmail?.trim().toLowerCase() ?? null;
 
   logInfo("Calling transactional RPC create_pos_sale", {
     productId: item.productId,
     qty: item.qty,
     paymentMethod,
-    customerId,
   });
 
   const { data, error } = await auth.supabase.rpc("create_pos_sale", {
@@ -306,7 +282,7 @@ export async function POST(req: Request) {
     p_payment_reference: paymentReference,
     p_customer_email: customerEmail,
     p_sold_by: auth.user.id,
-    p_customer_id: customerId,
+    p_customer_id: null,
   });
 
   if (error) {
@@ -386,21 +362,31 @@ export async function POST(req: Request) {
     pointsEarned: normalized.pointsEarned,
   });
 
-  if (customerId && normalized.orderId && normalized.pointsEarned > 0 && service) {
-    const { error: pointsError } = await service.rpc("add_points", {
-      p_user_id: customerId,
-      p_points: normalized.pointsEarned,
-      p_order_id: normalized.orderId,
-      p_description: `Puntos por venta física ${normalized.orderId}`,
-      p_created_by: auth.user.id,
+  let loyaltyStatus: string | null = null;
+  let loyaltyPointsAwarded = 0;
+
+  if (normalized.orderId) {
+    const { data: loyaltyData, error: loyaltyError } = await processLoyaltyAccrual({
+      sourceType: "pos_sale",
+      sourceId: normalized.orderId,
+      email: customerEmail,
+      amountCents: resolvedTotalCents ?? 0,
+      metadata: {
+        channel: "physical_store",
+        seller_id: auth.user.id,
+        payment_method: paymentMethod,
+      },
     });
 
-    if (pointsError) {
-      logError("add_points RPC failed after sale commit", {
+    if (loyaltyError) {
+      logError("process_loyalty_accrual failed after POS sale commit", {
         orderId: normalized.orderId,
-        customerId,
-        pointsError,
+        loyaltyError,
       });
+      loyaltyStatus = "error";
+    } else {
+      loyaltyStatus = loyaltyData?.status ?? "error";
+      loyaltyPointsAwarded = loyaltyData?.points_awarded ?? 0;
     }
   }
 
@@ -415,6 +401,8 @@ export async function POST(req: Request) {
       totalCents: resolvedTotalCents,
       createdAt: normalized.createdAt,
       paymentReference: normalized.paymentReference,
+      loyaltyStatus,
+      loyaltyPointsAwarded,
     },
     { status: 201 },
   );

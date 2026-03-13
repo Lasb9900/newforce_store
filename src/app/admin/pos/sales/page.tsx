@@ -53,7 +53,7 @@ export default async function AdminPosSalesPage({
           <table className="min-w-full text-sm">
             <thead className="bg-surfaceMuted text-left">
               <tr>
-                <th className="p-2">Fecha</th><th className="p-2">Order ID</th><th className="p-2">Producto</th><th className="p-2">Item #</th><th className="p-2">Cantidad</th><th className="p-2">Precio</th><th className="p-2">Total</th><th className="p-2">Método</th><th className="p-2">Referencia</th><th className="p-2">Email</th>
+                <th className="p-2">Fecha</th><th className="p-2">Order ID</th><th className="p-2">Producto</th><th className="p-2">Item #</th><th className="p-2">Cantidad</th><th className="p-2">Precio</th><th className="p-2">Total</th><th className="p-2">Método</th><th className="p-2">Referencia</th><th className="p-2">Email</th><th className="p-2">Fidelidad</th>
               </tr>
             </thead>
             <tbody>
@@ -69,6 +69,7 @@ export default async function AdminPosSalesPage({
                   <td className="p-2">{s.payment_method ?? "—"}</td>
                   <td className="p-2">{s.payment_reference ?? "—"}</td>
                   <td className="p-2">{s.customer_email ?? "—"}</td>
+                  <td className="p-2">{s.loyalty_status ?? "—"}{(s.loyalty_points ?? 0) > 0 ? ` (+${s.loyalty_points} pts)` : ""}</td>
                 </tr>
               ))}
             </tbody>

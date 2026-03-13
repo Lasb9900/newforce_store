@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { env } from "@/lib/env";
 import { getServiceSupabase } from "@/lib/supabase";
+import { processLoyaltyAccrual } from "@/lib/services/loyalty.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +33,7 @@ export async function POST(req: Request) {
 
   const { data: order, error: findOrderError } = await admin
     .from("orders")
-    .select("id,status,payment_status")
+    .select("id,status,payment_status,total_cents,user_id,buyer_email,email")
     .eq("stripe_session_id", session.id)
     .maybeSingle();
 
@@ -81,6 +82,18 @@ export async function POST(req: Request) {
     order_id: order.id,
     event_type: "checkout_session_completed",
     payload: { stripe_session_id: session.id },
+  });
+
+  await processLoyaltyAccrual({
+    sourceType: "online_order",
+    sourceId: order.id,
+    amountCents: Number(order.total_cents ?? 0),
+    userId: order.user_id ?? null,
+    email: order.buyer_email ?? order.email ?? null,
+    metadata: {
+      channel: "online",
+      stripe_session_id: session.id,
+    },
   });
 
   return NextResponse.json({ received: true });

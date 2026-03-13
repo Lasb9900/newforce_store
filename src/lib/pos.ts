@@ -14,6 +14,8 @@ export type PosSaleRow = {
   payment_method: "cash" | "card" | "transfer" | string | null;
   payment_reference: string | null;
   customer_email: string | null;
+  loyalty_status?: string | null;
+  loyalty_points?: number;
 };
 
 export type PosTotals = {
@@ -107,6 +109,31 @@ export async function fetchPosSalesRange(
     if (saleIdQuery && !`${row.sale_id}`.toLowerCase().includes(saleIdQuery.toLowerCase())) return false;
     return true;
   });
+
+  const orderIds = filtered.map((row) => row.order_id).filter((orderId): orderId is string => Boolean(orderId));
+  if (orderIds.length) {
+    const { data: loyaltyRows } = await service
+      .from("loyalty_transactions")
+      .select("source_id,status,points_delta")
+      .eq("source_type", "pos_sale")
+      .in("source_id", orderIds);
+
+    const loyaltyByOrderId = new Map(
+      (loyaltyRows ?? []).map((entry) => [String(entry.source_id), { status: entry.status, points: Number(entry.points_delta ?? 0) }]),
+    );
+
+    return {
+      data: filtered.map((row) => {
+        const loyalty = row.order_id ? loyaltyByOrderId.get(row.order_id) : null;
+        return {
+          ...row,
+          loyalty_status: loyalty?.status ?? null,
+          loyalty_points: loyalty?.points ?? 0,
+        };
+      }),
+      error: null,
+    };
+  }
 
   return { data: filtered, error: null };
 }
