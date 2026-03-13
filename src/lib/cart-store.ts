@@ -14,22 +14,39 @@ type CartState = {
 
 const KEY = "nf_cart";
 
+function persist(items: CartItem[]) {
+  localStorage.setItem(KEY, JSON.stringify(items));
+}
+
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
   addItem: (item) => {
-    const items = [...get().items, item];
-    localStorage.setItem(KEY, JSON.stringify(items));
+    const items = [...get().items];
+    const existingIndex = items.findIndex(
+      (current) => (current.variantId && current.variantId === item.variantId) || (!current.variantId && current.productId === item.productId),
+    );
+
+    if (existingIndex >= 0) {
+      items[existingIndex] = {
+        ...items[existingIndex],
+        qty: items[existingIndex].qty + item.qty,
+      };
+    } else {
+      items.push(item);
+    }
+
+    persist(items);
     set({ items });
   },
   updateQty: (index, qty) => {
     const items = [...get().items];
-    items[index].qty = qty;
-    localStorage.setItem(KEY, JSON.stringify(items));
+    items[index].qty = Math.max(1, qty);
+    persist(items);
     set({ items });
   },
   remove: (index) => {
-    const items = get().items.filter((_, i) => i !== index);
-    localStorage.setItem(KEY, JSON.stringify(items));
+    const items = get().items.filter((_, itemIndex) => itemIndex !== index);
+    persist(items);
     set({ items });
   },
   clear: () => {

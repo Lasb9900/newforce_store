@@ -13,26 +13,54 @@ const poppins = Poppins({
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const supabase = await getServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   return (
     <html lang="es">
       <body className={`${poppins.className} min-h-screen bg-surfaceMuted text-brand-ink`}>
-        <header className="sticky top-0 z-40 border-b border-white/10 bg-brand-primary shadow-sm">
-          <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 text-white">
+        <div className="border-b border-brand-primary/20 bg-brand-primary py-2 text-center text-xs font-medium text-white">
+          Free shipping over $99 • 30-day returns • Secure checkout
+        </div>
+        <header className="sticky top-0 z-40 border-b border-uiBorder bg-white/95 backdrop-blur">
+          <nav className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 text-sm md:flex-nowrap md:gap-4">
             <Link href="/" className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent">
               <Image src="/brand/cta-logo.svg" alt="Close to Amazon" width={208} height={42} priority className="h-10 w-auto" />
             </Link>
-            <div className="flex items-center gap-1 text-sm font-medium">
-              <Link href="/" className="rounded px-3 py-1.5 hover:bg-white/10">Home</Link>
-              <Link href="/shop" className="rounded px-3 py-1.5 hover:bg-white/10">Shop</Link>
+
+            <form action="/shop" className="order-3 w-full md:order-none md:flex-1">
+              <input
+                name="q"
+                placeholder="Search products, brands, SKU"
+                className="w-full rounded-lg border border-uiBorder bg-surface px-3 py-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20"
+              />
+            </form>
+
+            <div className="ml-auto flex items-center gap-1 font-medium text-brand-ink">
+              <Link href="/" className="rounded px-3 py-2 hover:bg-slate-100">
+                Home
+              </Link>
+              <Link href="/shop" className="rounded px-3 py-2 hover:bg-slate-100">
+                Shop
+              </Link>
+              <Link href="/wishlist" className="rounded px-3 py-2 hover:bg-slate-100">
+                Wishlist
+              </Link>
               <CartBadgeLink />
-              <Link href="/wishlist" className="rounded px-3 py-1.5 hover:bg-white/10">Wishlist</Link>
-              {user ? <Link href="/account" className="rounded px-3 py-1.5 hover:bg-white/10">Cuenta</Link> : <Link href="/login" className="rounded px-3 py-1.5 hover:bg-white/10">Login</Link>}
+              {user ? (
+                <Link href="/account" className="rounded px-3 py-2 hover:bg-slate-100">
+                  Cuenta
+                </Link>
+              ) : (
+                <Link href="/login" className="rounded px-3 py-2 hover:bg-slate-100">
+                  Login
+                </Link>
+              )}
             </div>
           </nav>
         </header>
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+        <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
       </body>
     </html>
   );
