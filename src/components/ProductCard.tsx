@@ -4,6 +4,7 @@ import { PriceDisplay } from "@/components/PriceDisplay";
 import { StockBadge } from "@/components/StockBadge";
 import { AddToCartButton } from "@/components/AddToCartButton";
 import { ProductImage } from "@/components/ProductImage";
+import { WishlistToggleButton } from "@/components/WishlistToggleButton";
 import {
   getCompareAtPriceCents,
   getDisplayCategory,
@@ -32,9 +33,7 @@ export function ProductCard({ product }: { product: Product }) {
         <ProductImage src={image.primary} alt={name} fill className="object-cover transition duration-500 group-hover:opacity-0" sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 20vw" />
         <ProductImage src={image.secondary ?? image.primary} alt={name} fill className="object-cover opacity-0 transition duration-500 group-hover:opacity-100" sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 20vw" />
 
-        <button type="button" aria-label="Add to wishlist" className="absolute right-3 top-3 rounded-full bg-white/90 p-2 text-slate-700 shadow-sm transition hover:scale-105">
-          ♡
-        </button>
+        <WishlistToggleButton productId={product.id} />
       </div>
 
       <div className="flex flex-1 flex-col gap-3 p-4">

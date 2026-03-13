@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useAuthStore } from "@/lib/auth-store";
 import Link from "next/link";
 
 function toErrorMessage(error: unknown) {
@@ -16,6 +17,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const refreshAuth = useAuthStore((state) => state.refresh);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -30,6 +32,7 @@ export default function LoginPage() {
       });
 
       const data = await res.json();
+      console.info("[LOGIN_DEBUG] response", { ok: res.ok, userId: data?.userId ?? null, render: "client" });
       setLoading(false);
 
       if (!res.ok) {
@@ -37,6 +40,7 @@ export default function LoginPage() {
         return;
       }
 
+      await refreshAuth();
       router.push(searchParams.get("next") || "/account");
       router.refresh();
     } catch (err) {

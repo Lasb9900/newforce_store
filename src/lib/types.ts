@@ -50,7 +50,7 @@ export type ProductImage = {
 };
 
 export type CartItem = {
-  productId?: string;
+  productId: string;
   variantId?: string;
   qty: number;
   name?: string;

@@ -12,6 +12,8 @@ export function AddToCart({ product }: { product: Product }) {
   const [variantId, setVariantId] = useState<string>("");
   const [qty, setQty] = useState(1);
   const addItem = useCartStore((state) => state.addItem);
+  const initialize = useCartStore((state) => state.initialize);
+  const syncing = useCartStore((state) => state.syncing);
 
   const variant = product.variants?.find((item) => item.id === variantId) as ProductVariant | undefined;
   const price = variant?.price_cents ?? product.base_price_cents ?? 0;
@@ -46,11 +48,12 @@ export function AddToCart({ product }: { product: Product }) {
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <button
           type="button"
-          disabled={outOfStock || invalidPrice}
+          disabled={outOfStock || invalidPrice || syncing}
           className="btn-primary w-full disabled:opacity-50"
-          onClick={() =>
-            addItem({
-              productId: variant ? undefined : product.id,
+          onClick={async () => {
+            await initialize();
+            await addItem({
+              productId: product.id,
               variantId: variant?.id,
               qty,
               name: displayName,
@@ -59,10 +62,10 @@ export function AddToCart({ product }: { product: Product }) {
               imageUrl: product.images?.[0]?.url,
               sku: variant?.sku ?? product.sku,
               availableStock: stock,
-            })
-          }
+            });
+          }}
         >
-          {outOfStock ? "Out of stock" : invalidPrice ? "Price pending" : "Add to cart"}
+          {outOfStock ? "Out of stock" : invalidPrice ? "Price pending" : syncing ? "Updating..." : "Add to cart"}
         </button>
         <Link href="/cart" className="btn-secondary w-full text-center">Buy now</Link>
       </div>

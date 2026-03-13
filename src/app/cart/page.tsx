@@ -36,7 +36,14 @@ function sanitizeShippingInput(shipping: ShippingForm): ShippingForm {
 }
 
 export default function CartPage() {
-  const { items, hydrate, updateQty, remove } = useCartStore();
+  const items = useCartStore((state) => state.items);
+  const initialized = useCartStore((state) => state.initialized);
+  const initialize = useCartStore((state) => state.initialize);
+  const syncing = useCartStore((state) => state.syncing);
+  const notice = useCartStore((state) => state.notice);
+  const dismissNotice = useCartStore((state) => state.dismissNotice);
+  const updateQty = useCartStore((state) => state.updateQty);
+  const remove = useCartStore((state) => state.remove);
   const [loadingCheckout, setLoadingCheckout] = useState(false);
   const [loadingRates, setLoadingRates] = useState(false);
   const [loadingSummary, setLoadingSummary] = useState(false);
@@ -53,8 +60,8 @@ export default function CartPage() {
   const itemPayload = useMemo(() => mapItemsPayload(items), [items]);
 
   useEffect(() => {
-    hydrate();
-  }, [hydrate]);
+    void initialize();
+  }, [initialize]);
 
   useEffect(() => {
     const stored = sessionStorage.getItem(SHIPPING_STORAGE_KEY);
@@ -103,8 +110,8 @@ export default function CartPage() {
   const taxCents = 0;
 
   const canCheckout = useMemo(
-    () => itemPayload.length > 0 && !loadingCheckout && !!selectedShipping,
-    [itemPayload.length, loadingCheckout, selectedShipping],
+    () => initialized && itemPayload.length > 0 && !loadingCheckout && !syncing && !!selectedShipping,
+    [initialized, itemPayload.length, loadingCheckout, syncing, selectedShipping],
   );
 
   function validateShipping(rawForm: ShippingForm) {
@@ -227,18 +234,19 @@ export default function CartPage() {
       <CheckoutHeader />
       <CheckoutTrustBadges />
 
+      {notice ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">{notice.message}<button className="ml-3 underline" onClick={dismissNotice}>Dismiss</button></div> : null}
       {formMessage ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{formMessage}</div> : null}
 
       <div className="space-y-2 lg:hidden">
         <button type="button" className="w-full rounded-xl border border-uiBorder bg-white px-4 py-3 text-left text-sm font-medium" onClick={() => setSummaryOpenMobile((prev) => !prev)}>
           {summaryOpenMobile ? "Hide order summary" : "Show order summary"}
         </button>
-        {summaryOpenMobile ? <OrderSummary items={items} subtotal={subtotalCents} shipping={shippingCents} tax={taxCents} loading={loadingSummary || loadingRates} /> : null}
+        {summaryOpenMobile ? <OrderSummary items={items} subtotal={subtotalCents} shipping={shippingCents} tax={taxCents} loading={!initialized || syncing || loadingSummary || loadingRates} /> : null}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
         <div className="space-y-4">
-          <CheckoutCartItems items={items} onQty={updateQty} onRemove={remove} />
+          <CheckoutCartItems items={items} onQty={(itemKey, qty) => void updateQty(itemKey, qty)} onRemove={(itemKey) => void remove(itemKey)} disabled={syncing || !initialized} />
           <ShippingAddressForm value={shipping} errors={errors} onChange={(patch) => setShipping((prev) => ({ ...prev, ...patch }))} />
           <ShippingMethods
             options={shippingOptions}
@@ -251,12 +259,12 @@ export default function CartPage() {
           />
           <section className="rounded-2xl border border-uiBorder bg-surface p-4 shadow-sm">
             <h2 className="mb-2 text-lg font-semibold">5. Payment</h2>
-            <CheckoutActions disabled={!canCheckout} loading={loadingCheckout} missingShipping={!selectedShipping} onCheckout={handleCheckout} />
+            <CheckoutActions disabled={!canCheckout} loading={loadingCheckout || syncing || !initialized} missingShipping={!selectedShipping} onCheckout={handleCheckout} />
           </section>
         </div>
 
         <div className="hidden lg:block lg:sticky lg:top-4 lg:self-start">
-          <OrderSummary items={items} subtotal={subtotalCents} shipping={shippingCents} tax={taxCents} loading={loadingSummary || loadingRates} />
+          <OrderSummary items={items} subtotal={subtotalCents} shipping={shippingCents} tax={taxCents} loading={!initialized || syncing || loadingSummary || loadingRates} />
         </div>
       </div>
     </div>

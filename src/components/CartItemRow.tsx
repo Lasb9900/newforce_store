@@ -8,10 +8,12 @@ export function CartItemRow({
   item,
   onQty,
   onRemove,
+  disabled,
 }: {
   item: CartItem;
   onQty: (qty: number) => void;
   onRemove: () => void;
+  disabled?: boolean;
 }) {
   const unit = Number(item.unitPriceCents ?? 0);
   const safeUnit = unit > 0 ? unit : null;
@@ -36,18 +38,19 @@ export function CartItemRow({
 
       <div className="flex items-center gap-2">
         <div className="flex items-center rounded-lg border border-uiBorder">
-          <button type="button" onClick={() => onQty(Math.max(1, item.qty - 1))} className="px-2 py-1 text-sm hover:bg-surfaceMuted" aria-label="Decrease quantity">−</button>
+          <button disabled={disabled} type="button" onClick={() => onQty(Math.max(1, item.qty - 1))} className="px-2 py-1 text-sm hover:bg-surfaceMuted disabled:opacity-40" aria-label="Decrease quantity">−</button>
           <input
             type="number"
             min={1}
             value={item.qty}
+            disabled={disabled}
             onChange={(event) => onQty(Math.max(1, Number(event.target.value) || 1))}
             className="w-12 border-x border-uiBorder p-1 text-center text-sm focus:outline-none"
             aria-label="Quantity"
           />
-          <button type="button" onClick={() => onQty(item.qty + 1)} className="px-2 py-1 text-sm hover:bg-surfaceMuted" aria-label="Increase quantity">+</button>
+          <button disabled={disabled} type="button" onClick={() => onQty(item.qty + 1)} className="px-2 py-1 text-sm hover:bg-surfaceMuted disabled:opacity-40" aria-label="Increase quantity">+</button>
         </div>
-        <button onClick={onRemove} className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50">
+        <button disabled={disabled} onClick={onRemove} className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40">
           Remove
         </button>
       </div>

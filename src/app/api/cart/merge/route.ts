@@ -1,0 +1,33 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { requireUserApi } from "@/lib/auth";
+import { CartApiError, loadUserCart, normalizeCartItems, saveUserCart } from "@/lib/cart-server";
+
+const bodySchema = z.object({
+  guestItems: z.array(z.object({ productId: z.string().uuid(), variantId: z.string().uuid().optional(), qty: z.number().int().min(1).max(999) })).max(25),
+});
+
+export async function POST(req: Request) {
+  const auth = await requireUserApi();
+  if ("error" in auth) return auth.error;
+
+  const parsed = bodySchema.safeParse(await req.json());
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+
+  try {
+    const current = await loadUserCart(auth.supabase, auth.user.id);
+    const merged = await normalizeCartItems(auth.supabase, [...current.items, ...parsed.data.guestItems]);
+    await saveUserCart(auth.supabase, auth.user.id, merged.items);
+
+    const notices = [...merged.notices];
+    if (parsed.data.guestItems.length > 0) {
+      notices.unshift({ type: "info", message: "Your guest cart was merged into your account cart." });
+    }
+
+    return NextResponse.json({ data: merged.items, notices });
+  } catch (error) {
+    const known = error instanceof CartApiError ? error : null;
+    const status = known?.code === "23503" ? 404 : known?.code === "23514" ? 409 : 500;
+    return NextResponse.json({ error: "Failed to merge cart", ...(process.env.NODE_ENV !== "production" ? { message: error instanceof Error ? error.message : "Unknown", step: known?.step ?? "merge_cart", code: known?.code ?? null } : null) }, { status });
+  }
+}

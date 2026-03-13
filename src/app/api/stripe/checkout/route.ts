@@ -8,6 +8,7 @@ import { calculateTaxCents, resolveShippingOption } from "@/lib/shipping";
 import { getShippingOptions } from "@/lib/services/shipping.service";
 import { buildCheckoutPricing } from "@/lib/services/checkout-pricing.service";
 import { buildStripeLineItems } from "@/lib/services/stripe-checkout.service";
+import { loadUserCart } from "@/lib/cart-server";
 
 export async function POST(req: Request) {
   const parsed = stripeCheckoutSchema.safeParse(await req.json());
@@ -25,7 +26,11 @@ export async function POST(req: Request) {
       data: { user },
     } = await sb.auth.getUser();
 
-    const validatedCart = await validateCartItems(sb, parsed.data.items);
+    const cartInput = user
+      ? (await loadUserCart(sb, user.id)).items.map((item) => ({ productId: item.productId, variantId: item.variantId, qty: item.qty }))
+      : parsed.data.items;
+
+    const validatedCart = await validateCartItems(sb, cartInput);
     const { options: shippingOptions } = await getShippingOptions({
       subtotalCents: validatedCart.subtotal_cents,
       destinationPostalCode: parsed.data.shipping.postal_code,

@@ -2,6 +2,7 @@
 
 import clsx from "clsx";
 import { getBrowserSupabase } from "@/lib/supabase-browser";
+import { useAuthStore } from "@/lib/auth-store";
 
 type Props = {
   className?: string;
@@ -10,6 +11,7 @@ type Props = {
 };
 
 export default function SignOutButton({ className, children, redirectTo = "/login" }: Props) {
+  const refreshAuth = useAuthStore((state) => state.refresh);
   async function logout() {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -20,6 +22,7 @@ export default function SignOutButton({ className, children, redirectTo = "/logi
     // Fallback cleanup on browser side as well.
     const supabase = getBrowserSupabase();
     await supabase.auth.signOut();
+    await refreshAuth();
     location.href = redirectTo;
   }
 
