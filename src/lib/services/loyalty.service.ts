@@ -25,7 +25,18 @@ export async function processLoyaltyAccrual(input: {
   userId?: string | null;
   metadata?: Record<string, unknown>;
 }) {
-  const admin = getServiceSupabase();
+  let admin: ReturnType<typeof getServiceSupabase>;
+  try {
+    admin = getServiceSupabase();
+  } catch (error) {
+    return {
+      data: null,
+      error: {
+        message: error instanceof Error ? error.message : "Unable to initialize Supabase admin client",
+      },
+    };
+  }
+
   const normalizedEmail = normalizeCustomerEmail(input.email);
 
   const { data, error } = await admin.rpc("process_loyalty_accrual", {
@@ -38,7 +49,13 @@ export async function processLoyaltyAccrual(input: {
   });
 
   if (error) {
-    return { data: null, error };
+    return {
+      data: null,
+      error: {
+        ...error,
+        message: error.message || "Failed to execute process_loyalty_accrual",
+      },
+    };
   }
 
   const payload = Array.isArray(data) ? data[0] : data;

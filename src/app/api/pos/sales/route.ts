@@ -508,6 +508,16 @@ export async function POST(req: Request) {
   } catch (postError) {
     loyaltyStatus = "error";
     loyaltyErrorMessage = postError instanceof Error ? postError.message : String(postError);
+
+    try {
+      await auth.supabase
+        .from("pos_sales")
+        .update({ loyalty_status: "error", loyalty_error: loyaltyErrorMessage })
+        .eq("id", normalized.saleId);
+    } catch {
+      // no-op: keep non-fatal semantics
+    }
+
     logError("Non-fatal post-processing error", {
       saleId: normalized.saleId,
       error: loyaltyErrorMessage,
