@@ -23,7 +23,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: (error as Error).message }, { status: 400 });
   }
 
-  console.log("[CHECKOUT] webhook received:", event.type);
   if (event.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true });
   }
@@ -31,93 +30,58 @@ export async function POST(req: Request) {
   const session = event.data.object;
   const admin = getServiceSupabase();
 
-  const { data: existingOrder } = await admin.from("orders").select("id,user_id").eq("stripe_session_id", session.id).maybeSingle();
-  if (existingOrder) {
+  const { data: order, error: findOrderError } = await admin
+    .from("orders")
+    .select("id,status,payment_status")
+    .eq("stripe_session_id", session.id)
+    .maybeSingle();
+
+  if (findOrderError || !order) {
+    return NextResponse.json({ error: findOrderError?.message ?? "Order not found for session" }, { status: 404 });
+  }
+
+  if (order.status === "paid" && order.payment_status === "paid") {
     return NextResponse.json({ received: true, idempotent: true });
   }
 
-  const items = JSON.parse((session.metadata?.cart as string) || "[]") as Array<{ productId?: string; variantId?: string; qty: number }>;
-
-  const { data: order, error: orderError } = await admin
+  const { error: markPaidError } = await admin
     .from("orders")
-    .insert({
-      user_id: session.client_reference_id || null,
-      buyer_email: session.metadata?.shipping_email ?? session.customer_details?.email ?? null,
-      buyer_name: session.metadata?.shipping_full_name ?? session.customer_details?.name ?? null,
-      buyer_phone: session.metadata?.shipping_phone ?? session.customer_details?.phone ?? null,
+    .update({
       status: "paid",
       payment_status: "paid",
-      payment_method: "stripe",
-      channel: "online",
-      subtotal_cents: Number(session.amount_subtotal ?? 0),
-      total_cents: Number(session.amount_total ?? 0),
-      currency: String(session.currency || "usd").toUpperCase(),
-      stripe_session_id: session.id,
-      stripe_payment_intent_id: String(session.payment_intent || ""),
-      shipping_address: {
-        line1: session.metadata?.shipping_address_line_1 ?? session.customer_details?.address?.line1 ?? null,
-        line2: session.metadata?.shipping_address_line_2 ?? session.customer_details?.address?.line2 ?? null,
-        city: session.metadata?.shipping_city ?? session.customer_details?.address?.city ?? null,
-        state: session.metadata?.shipping_state ?? session.customer_details?.address?.state ?? null,
-        postal_code: session.metadata?.shipping_postal_code ?? session.customer_details?.address?.postal_code ?? null,
-        country: session.metadata?.shipping_country ?? session.customer_details?.address?.country ?? "US",
-        delivery_notes: session.metadata?.delivery_notes ?? null,
-      },
-      points_earned: Math.floor(Number(session.amount_total ?? 0) / 100),
+      paid_at: new Date().toISOString(),
     })
-    .select()
-    .single();
+    .eq("id", order.id);
 
-  if (orderError || !order) {
-    return NextResponse.json({ error: orderError?.message ?? "Cannot create order" }, { status: 500 });
+  if (markPaidError) {
+    return NextResponse.json({ error: markPaidError.message }, { status: 500 });
   }
 
-  console.log("[CHECKOUT] order marked paid:", order.id);
+  const { data: orderItems, error: orderItemsError } = await admin
+    .from("order_items")
+    .select("id,product_id,variant_id,quantity,qty")
+    .eq("order_id", order.id);
 
-  for (const item of items) {
-    if (item.variantId) {
-      const { data: variant } = await admin
-        .from("product_variants")
-        .select("id,product_id,variant_name,price_cents,products(name)")
-        .eq("id", item.variantId)
-        .single();
-      if (!variant) continue;
+  if (orderItemsError) {
+    return NextResponse.json({ error: orderItemsError.message }, { status: 500 });
+  }
 
-      const variantProduct = Array.isArray(variant.products) ? variant.products[0] : variant.products;
-      await admin.from("order_items").insert({
-        order_id: order.id,
-        product_id: variant.product_id,
-        variant_id: variant.id,
-        name_snapshot: variantProduct?.name ?? "Variant",
-        variant_snapshot: variant.variant_name,
-        unit_price_cents_snapshot: variant.price_cents,
-        qty: item.qty,
-      });
-      await admin.rpc("decrement_variant_stock", { variant_id: variant.id, qty: item.qty });
-    } else if (item.productId) {
-      const { data: product } = await admin.from("products").select("id,name,base_price_cents").eq("id", item.productId).single();
-      if (!product) continue;
+  for (const item of orderItems ?? []) {
+    const qty = Number(item.quantity ?? item.qty ?? 0);
+    if (!qty || qty < 1) continue;
 
-      await admin.from("order_items").insert({
-        order_id: order.id,
-        product_id: product.id,
-        name_snapshot: product.name,
-        unit_price_cents_snapshot: product.base_price_cents,
-        qty: item.qty,
-      });
-      await admin.rpc("decrement_product_stock", { product_id: product.id, qty: item.qty });
+    if (item.variant_id) {
+      await admin.rpc("decrement_variant_stock", { variant_id: item.variant_id, qty });
+    } else {
+      await admin.rpc("decrement_product_stock", { product_id: item.product_id, qty });
     }
   }
 
-  if (order.user_id && order.points_earned > 0) {
-    await admin.rpc("add_points", {
-      p_user_id: order.user_id,
-      p_points: order.points_earned,
-      p_order_id: order.id,
-      p_description: `Puntos por orden online ${order.id}`,
-      p_created_by: null,
-    });
-  }
+  await admin.from("order_events").insert({
+    order_id: order.id,
+    event_type: "checkout_session_completed",
+    payload: { stripe_session_id: session.id },
+  });
 
   return NextResponse.json({ received: true });
 }

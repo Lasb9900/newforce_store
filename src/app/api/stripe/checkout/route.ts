@@ -1,139 +1,146 @@
-import Stripe from "stripe";
 import { NextResponse } from "next/server";
-import { createCheckoutSchema } from "@/lib/schemas";
+import { stripeCheckoutSchema } from "@/lib/schemas";
 import { getServerSupabase } from "@/lib/supabase";
 import { stripe } from "@/lib/stripe";
 import { env } from "@/lib/env";
+import { validateCartItems } from "@/lib/checkout";
+import { calculateTaxCents, resolveShippingOption } from "@/lib/shipping";
+import { getShippingOptions } from "@/lib/services/shipping.service";
+import { buildCheckoutPricing } from "@/lib/services/checkout-pricing.service";
+import { buildStripeLineItems } from "@/lib/services/stripe-checkout.service";
 
 export async function POST(req: Request) {
-  const body = await req.json();
-  console.log("[CHECKOUT] payload received:", body);
-
-  const parsed = createCheckoutSchema.safeParse(body);
+  const parsed = stripeCheckoutSchema.safeParse(await req.json());
   if (!parsed.success) {
-    console.log("[CHECKOUT] error exact:", parsed.error.flatten());
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const shipping = parsed.data.shipping;
-  console.log("[CHECKOUT] shipping data present:", !!shipping);
-  console.log("[CHECKOUT] validated shipping country:", shipping.country);
-  console.log("[CHECKOUT] validated shipping state:", shipping.state);
-  console.log("[CHECKOUT] validated ZIP:", shipping.postal_code);
-  console.log("[CHECKOUT] cart items:", parsed.data.items);
-
-  if (shipping.country !== "US") {
-    console.log("[CHECKOUT] error exact:", "Shipping country must be US");
-    return NextResponse.json({ error: "Solo enviamos a Estados Unidos" }, { status: 400 });
-  }
-
   if (!stripe) {
-    console.log("[CHECKOUT] error exact:", "Stripe not configured (missing STRIPE_SECRET_KEY)");
     return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
   }
 
-  const sb = await getServerSupabase();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-
-  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
-  let computedTotal = 0;
-
-  for (const item of parsed.data.items) {
-    if (item.variantId) {
-      const { data: variant } = await sb
-        .from("product_variants")
-        .select("id, variant_name, price_cents, stock, active, products(name,currency,active)")
-        .eq("id", item.variantId)
-        .single();
-
-      const productRow = Array.isArray(variant?.products) ? variant?.products[0] : variant?.products;
-      const unitAmount = Number(variant?.price_cents ?? 0);
-      if (!variant?.active || !productRow?.active || variant.stock < item.qty || unitAmount <= 0) {
-        return NextResponse.json({ error: `Variant ${item.variantId} invalid stock/active/price` }, { status: 400 });
-      }
-
-      computedTotal += unitAmount * item.qty;
-      lineItems.push({
-        quantity: item.qty,
-        price_data: {
-          currency: String(productRow?.currency ?? "USD").toLowerCase(),
-          unit_amount: unitAmount,
-          product_data: { name: `${productRow?.name ?? "Product"} - ${variant.variant_name}` },
-        },
-      });
-    } else if (item.productId) {
-      const { data: product } = await sb
-        .from("products")
-        .select("id,name,currency,active,base_price_cents,base_stock,has_variants")
-        .eq("id", item.productId)
-        .single();
-
-      const unitAmount = Number(product?.base_price_cents ?? 0);
-      if (!product?.active || product.has_variants || product.base_stock < item.qty || unitAmount <= 0) {
-        return NextResponse.json({ error: `Product ${item.productId} invalid stock/active/price` }, { status: 400 });
-      }
-
-      computedTotal += unitAmount * item.qty;
-      lineItems.push({
-        quantity: item.qty,
-        price_data: {
-          currency: String(product.currency ?? "USD").toLowerCase(),
-          unit_amount: unitAmount,
-          product_data: { name: product.name },
-        },
-      });
-    }
-  }
-
-  console.log("[CHECKOUT] computed total from DB:", computedTotal);
-  if (computedTotal <= 0 || lineItems.length === 0) {
-    return NextResponse.json({ error: "Cart total inválido" }, { status: 400 });
-  }
-
-  const successUrl = env.STRIPE_SUCCESS_URL ?? `${env.NEXT_PUBLIC_SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = env.STRIPE_CANCEL_URL ?? `${env.NEXT_PUBLIC_SITE_URL}/cancel`;
-
-  console.log("[CHECKOUT] stripe key present:", Boolean(env.STRIPE_SECRET_KEY));
-  const sessionParams: Stripe.Checkout.SessionCreateParams = {
-    client_reference_id: user?.id,
-    mode: "payment",
-    line_items: lineItems,
-    customer_email: shipping.email,
-    shipping_address_collection: { allowed_countries: ["US"] },
-    phone_number_collection: { enabled: true },
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-    metadata: {
-      cart: JSON.stringify(parsed.data.items).slice(0, 450),
-      shipping_full_name: shipping.full_name,
-      shipping_email: shipping.email,
-      shipping_phone: shipping.phone,
-      shipping_address_line_1: shipping.address_line_1,
-      shipping_city: shipping.city,
-      shipping_state: shipping.state,
-      shipping_postal_code: shipping.postal_code,
-      shipping_country: shipping.country,
-      shipping_address_line_2: shipping.address_line_2 ?? "",
-      delivery_notes: shipping.delivery_notes ?? "",
-    },
-  };
-
-  console.log("[CHECKOUT] stripe session params:", {
-    mode: sessionParams.mode,
-    lineItemsCount: sessionParams.line_items?.length,
-    success_url: sessionParams.success_url,
-    cancel_url: sessionParams.cancel_url,
-    customer_email: sessionParams.customer_email,
-  });
-
   try {
-    const session = await stripe.checkout.sessions.create(sessionParams);
-    console.log("[CHECKOUT] stripe session created:", { id: session.id, url: session.url });
+    const sb = await getServerSupabase();
+    const {
+      data: { user },
+    } = await sb.auth.getUser();
+
+    const validatedCart = await validateCartItems(sb, parsed.data.items);
+    const { options: shippingOptions } = await getShippingOptions({
+      subtotalCents: validatedCart.subtotal_cents,
+      destinationPostalCode: parsed.data.shipping.postal_code,
+      destinationState: parsed.data.shipping.state,
+      destinationCountry: parsed.data.shipping.country,
+      weightGrams: validatedCart.total_weight_grams,
+    });
+
+    const selectedShipping = resolveShippingOption(shippingOptions, parsed.data.shipping_option_id);
+    if (!selectedShipping) {
+      return NextResponse.json({ error: "Selected shipping option is no longer available" }, { status: 400 });
+    }
+
+    const pricing = buildCheckoutPricing({
+      cart: validatedCart,
+      shippingCents: selectedShipping.amount_cents,
+      taxCents: calculateTaxCents(),
+      discountCents: 0,
+    });
+
+    const { data: order, error: orderError } = await sb
+      .from("orders")
+      .insert({
+        user_id: user?.id ?? null,
+        buyer_email: parsed.data.shipping.email,
+        buyer_name: parsed.data.shipping.full_name,
+        buyer_phone: parsed.data.shipping.phone,
+        email: parsed.data.shipping.email,
+        full_name: parsed.data.shipping.full_name,
+        phone: parsed.data.shipping.phone,
+        subtotal_cents: pricing.subtotal_cents,
+        shipping_cents: pricing.shipping_cents,
+        tax_cents: pricing.tax_cents,
+        total_cents: pricing.total_cents,
+        status: "pending",
+        payment_status: "pending",
+        currency: "USD",
+        shipping_address: {
+          line1: parsed.data.shipping.address_line_1,
+          line2: parsed.data.shipping.address_line_2 || null,
+          city: parsed.data.shipping.city,
+          state: parsed.data.shipping.state,
+          postal_code: parsed.data.shipping.postal_code,
+          country: parsed.data.shipping.country,
+          delivery_notes: parsed.data.shipping.delivery_notes || null,
+        },
+        shipping_address_line_1: parsed.data.shipping.address_line_1,
+        shipping_city: parsed.data.shipping.city,
+        shipping_state: parsed.data.shipping.state,
+        shipping_postal_code: parsed.data.shipping.postal_code,
+        shipping_country: parsed.data.shipping.country,
+      })
+      .select("id")
+      .single();
+
+    if (orderError || !order) {
+      return NextResponse.json({ error: orderError?.message ?? "Unable to create preliminary order" }, { status: 500 });
+    }
+
+    const { error: orderItemsError } = await sb.from("order_items").insert(
+      validatedCart.items.map((item) => ({
+        order_id: order.id,
+        product_id: item.product_id,
+        variant_id: item.variant_id,
+        qty: item.quantity,
+        quantity: item.quantity,
+        unit_price_cents_snapshot: item.unit_price_cents,
+        unit_price_cents: item.unit_price_cents,
+        line_total_cents: item.line_total_cents,
+        name_snapshot: item.product_name_snapshot,
+        product_name_snapshot: item.product_name_snapshot,
+      })),
+    );
+
+    if (orderItemsError) {
+      return NextResponse.json({ error: orderItemsError.message }, { status: 500 });
+    }
+
+    const lineItems = buildStripeLineItems({
+      cart: validatedCart,
+      shippingName: selectedShipping.name,
+      shippingCents: pricing.shipping_cents,
+    });
+
+    const successUrl = env.STRIPE_SUCCESS_URL ?? `${env.NEXT_PUBLIC_SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = env.STRIPE_CANCEL_URL ?? `${env.NEXT_PUBLIC_SITE_URL}/cancel`;
+
+    const session = await stripe.checkout.sessions.create({
+      client_reference_id: user?.id,
+      mode: "payment",
+      line_items: lineItems,
+      customer_email: parsed.data.shipping.email,
+      shipping_address_collection: { allowed_countries: ["US"] },
+      phone_number_collection: { enabled: true },
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: {
+        order_id: order.id,
+        shipping_option_id: parsed.data.shipping_option_id,
+      },
+    });
+
+    const { error: updateOrderError } = await sb
+      .from("orders")
+      .update({ stripe_session_id: session.id })
+      .eq("id", order.id);
+
+    if (updateOrderError) {
+      return NextResponse.json({ error: updateOrderError.message }, { status: 500 });
+    }
+
+    await sb.from("order_events").insert({ order_id: order.id, event_type: "checkout_session_created", payload: { stripe_session_id: session.id } });
+
     return NextResponse.json({ url: session.url });
-  } catch (error) {
-    console.log("[CHECKOUT] error exact:", error);
-    return NextResponse.json({ error: (error as Error).message || "Stripe checkout failed" }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Unable to start secure payment" }, { status: 500 });
   }
 }

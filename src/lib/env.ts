@@ -10,6 +10,13 @@ const schema = z.object({
   STRIPE_SUCCESS_URL: z.string().optional(),
   STRIPE_CANCEL_URL: z.string().optional(),
   SUPABASE_STORAGE_BUCKET: z.string().default("product-images"),
+  UPS_CLIENT_ID: z.string().optional(),
+  UPS_CLIENT_SECRET: z.string().optional(),
+  UPS_ACCOUNT_NUMBER: z.string().optional(),
+  UPS_SHIPPER_ZIP: z.string().optional(),
+  UPS_SHIPPER_COUNTRY: z.string().default("US"),
+  UPS_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
+
 });
 
 function inferProjectRefFromDbUrl(dbUrl: URL): string | null {
