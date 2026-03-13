@@ -16,11 +16,12 @@ export function AddToCartButton({ productId, name, unitPriceCents, imageUrl, sto
   const [added, setAdded] = useState(false);
 
   const outOfStock = stock <= 0;
+  const priceUnavailable = unitPriceCents <= 0;
 
   return (
     <button
       type="button"
-      disabled={outOfStock}
+      disabled={outOfStock || priceUnavailable}
       className="btn-primary w-full text-sm disabled:cursor-not-allowed disabled:opacity-60"
       onClick={() => {
         addItem({
@@ -35,7 +36,7 @@ export function AddToCartButton({ productId, name, unitPriceCents, imageUrl, sto
         setTimeout(() => setAdded(false), 1400);
       }}
     >
-      {outOfStock ? "Out of stock" : added ? "Added ✓" : "Add to cart"}
+      {outOfStock ? "Out of stock" : priceUnavailable ? "Price pending" : added ? "Added ✓" : "Add to cart"}
     </button>
   );
 }

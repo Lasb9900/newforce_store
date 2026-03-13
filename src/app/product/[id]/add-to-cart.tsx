@@ -6,6 +6,7 @@ import { Product, ProductVariant } from "@/lib/types";
 import { VariantSelector } from "@/components/VariantSelector";
 import { useCartStore } from "@/lib/cart-store";
 import { formatCurrency } from "@/lib/utils";
+import { getDisplayName } from "@/lib/catalog-presenter";
 
 export function AddToCart({ product }: { product: Product }) {
   const [variantId, setVariantId] = useState<string>("");
@@ -16,13 +17,15 @@ export function AddToCart({ product }: { product: Product }) {
   const price = variant?.price_cents ?? product.base_price_cents ?? 0;
   const stock = variant?.stock ?? product.base_stock;
   const outOfStock = stock <= 0;
+  const invalidPrice = price <= 0;
+  const displayName = getDisplayName(product);
 
   return (
     <div className="space-y-4 rounded-xl border border-uiBorder bg-surfaceMuted p-4">
       {product.has_variants && product.variants ? <VariantSelector variants={product.variants} value={variantId} onChange={setVariantId} /> : null}
 
       <div className="flex items-center justify-between rounded-lg bg-white p-3">
-        <p className="text-sm font-semibold text-brand-primary">{formatCurrency(price)}</p>
+        <p className="text-sm font-semibold text-brand-primary">{invalidPrice ? "Price available at checkout" : formatCurrency(price)}</p>
         <p className="text-xs text-mutedText">SKU: {variant?.sku ?? product.sku ?? "N/A"}</p>
       </div>
 
@@ -43,14 +46,14 @@ export function AddToCart({ product }: { product: Product }) {
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <button
           type="button"
-          disabled={outOfStock}
+          disabled={outOfStock || invalidPrice}
           className="btn-primary w-full disabled:opacity-50"
           onClick={() =>
             addItem({
               productId: variant ? undefined : product.id,
               variantId: variant?.id,
               qty,
-              name: product.name,
+              name: displayName,
               unitPriceCents: price,
               variantName: variant?.variant_name,
               imageUrl: product.images?.[0]?.url,
@@ -59,7 +62,7 @@ export function AddToCart({ product }: { product: Product }) {
             })
           }
         >
-          {outOfStock ? "Out of stock" : "Add to cart"}
+          {outOfStock ? "Out of stock" : invalidPrice ? "Price pending" : "Add to cart"}
         </button>
         <Link href="/cart" className="btn-secondary w-full text-center">Buy now</Link>
       </div>

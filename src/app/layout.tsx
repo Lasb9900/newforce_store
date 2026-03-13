@@ -1,9 +1,15 @@
 import "./globals.css";
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { Poppins } from "next/font/google";
 import { CartBadgeLink } from "@/components/nav/CartBadgeLink";
 import { getServerSupabase } from "@/lib/supabase";
+
+export const metadata: Metadata = {
+  title: "Newforce Store | Retail Electronics & Home",
+  description: "Shop premium home and tech products with trusted shipping, secure checkout and easy returns.",
+};
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -26,7 +32,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <header className="sticky top-0 z-40 border-b border-uiBorder bg-white/95 backdrop-blur">
           <nav className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 text-sm md:flex-nowrap md:gap-4">
             <Link href="/" className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent">
-              <Image src="/brand/cta-logo.svg" alt="Close to Amazon" width={208} height={42} priority className="h-10 w-auto" />
+              <Image src="/brand/cta-logo.svg" alt="Newforce Store" width={208} height={42} priority className="h-10 w-auto" />
             </Link>
 
             <form action="/shop" className="order-3 w-full md:order-none md:flex-1">
@@ -38,25 +44,11 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
             </form>
 
             <div className="ml-auto flex items-center gap-1 font-medium text-brand-ink">
-              <Link href="/" className="rounded px-3 py-2 hover:bg-slate-100">
-                Home
-              </Link>
-              <Link href="/shop" className="rounded px-3 py-2 hover:bg-slate-100">
-                Shop
-              </Link>
-              <Link href="/wishlist" className="rounded px-3 py-2 hover:bg-slate-100">
-                Wishlist
-              </Link>
+              <Link href="/" className="rounded px-3 py-2 hover:bg-slate-100">Home</Link>
+              <Link href="/shop" className="rounded px-3 py-2 hover:bg-slate-100">Shop</Link>
+              <Link href="/wishlist" className="rounded px-3 py-2 hover:bg-slate-100">Wishlist</Link>
               <CartBadgeLink />
-              {user ? (
-                <Link href="/account" className="rounded px-3 py-2 hover:bg-slate-100">
-                  Cuenta
-                </Link>
-              ) : (
-                <Link href="/login" className="rounded px-3 py-2 hover:bg-slate-100">
-                  Login
-                </Link>
-              )}
+              {user ? <Link href="/account" className="rounded px-3 py-2 hover:bg-slate-100">Cuenta</Link> : <Link href="/login" className="rounded px-3 py-2 hover:bg-slate-100">Login</Link>}
             </div>
           </nav>
         </header>

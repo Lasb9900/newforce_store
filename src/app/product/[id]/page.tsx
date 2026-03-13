@@ -2,11 +2,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AddToCart } from "./add-to-cart";
-import { RatingStars } from "@/components/RatingStars";
 import { PriceDisplay } from "@/components/PriceDisplay";
 import { StockBadge } from "@/components/StockBadge";
 import { ProductCard } from "@/components/ProductCard";
+import { ProductImage } from "@/components/ProductImage";
 import { getServerSupabase } from "@/lib/supabase";
+import { getCompareAtPriceCents, getDisplayCategory, getDisplayName, getDisplayPriceCents, getPrimaryImage, getStockCount } from "@/lib/catalog-presenter";
 
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -20,11 +21,13 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   if (!product) notFound();
 
   const images = (product.images ?? []).sort((a: { sort_order: number }, b: { sort_order: number }) => a.sort_order - b.sort_order);
-  const cover = images[0]?.url ?? product.image_url ?? "https://placehold.co/800x800?text=Product";
+  const image = getPrimaryImage(product);
   const visibleReviews = (product.reviews ?? []).filter((review: { status: string }) => review.status === "visible");
-  const avg = visibleReviews.length
-    ? visibleReviews.reduce((sum: number, review: { rating: number }) => sum + review.rating, 0) / visibleReviews.length
-    : 0;
+  const price = getDisplayPriceCents(product);
+  const compareAt = getCompareAtPriceCents(product, price);
+  const stock = getStockCount(product);
+  const name = getDisplayName(product);
+  const category = getDisplayCategory(product);
 
   const { data: related } = await sb
     .from("products")
@@ -33,54 +36,58 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
     .neq("id", id)
     .limit(4);
 
-  const price = product.base_price_cents ?? 0;
-
   return (
     <div className="space-y-8">
       <nav className="text-sm text-mutedText">
-        <Link href="/" className="hover:text-brand-primary">Home</Link> / <Link href="/shop" className="hover:text-brand-primary">Shop</Link> / <span>{product.name}</span>
+        <Link href="/" className="hover:text-brand-primary">Home</Link> / <Link href="/shop" className="hover:text-brand-primary">Shop</Link> / <span>{name}</span>
       </nav>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-3">
           <div className="relative aspect-square overflow-hidden rounded-2xl border border-uiBorder bg-surface">
-            <Image src={cover} alt={product.name} fill className="object-cover" sizes="(max-width: 1024px) 100vw, 50vw" priority />
+            <ProductImage src={image.primary} alt={name} fill sizes="(max-width: 1024px) 100vw, 50vw" priority className="object-cover" />
           </div>
           <div className="grid grid-cols-4 gap-3">
-            {images.slice(0, 4).map((image: { id: string; url: string }, index: number) => (
-              <div key={image.id ?? index} className="relative aspect-square overflow-hidden rounded-lg border border-uiBorder bg-surface">
-                <Image src={image.url} alt={`${product.name} ${index + 1}`} fill className="object-cover" sizes="25vw" />
+            {images.slice(0, 4).map((item: { id: string; url: string }, index: number) => (
+              <div key={item.id ?? index} className="relative aspect-square overflow-hidden rounded-lg border border-uiBorder bg-surface">
+                <Image src={item.url} alt={`${name} ${index + 1}`} fill className="object-cover" sizes="25vw" unoptimized />
               </div>
             ))}
           </div>
         </div>
 
         <div className="space-y-4 rounded-2xl border border-uiBorder bg-surface p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-wide text-mutedText">{product.category?.name ?? product.department ?? "General"}</p>
-          <h1 className="text-3xl font-bold text-brand-ink">{product.name}</h1>
-          <div className="flex items-center gap-3">
-            <RatingStars rating={avg || 4.6} />
-            <span className="text-sm text-mutedText">{visibleReviews.length || 0} reviews</span>
-          </div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-mutedText">{category}</p>
+          <h1 className="text-3xl font-bold text-brand-ink">{name}</h1>
+          <p className="text-sm text-mutedText">{visibleReviews.length} verified reviews</p>
 
-          <PriceDisplay priceCents={price} compareAtPriceCents={product.price_cents} />
-          <StockBadge stock={product.base_stock ?? product.qty ?? 0} />
+          {price ? <PriceDisplay priceCents={price} compareAtPriceCents={compareAt} /> : <p className="text-sm font-semibold text-brand-primary">Price available at checkout</p>}
+          <StockBadge stock={stock} />
           <p className="text-sm text-mutedText">SKU: {product.sku ?? "N/A"}</p>
 
           <AddToCart product={product} />
 
           <div className="rounded-xl bg-surfaceMuted p-4 text-sm text-mutedText">
-            <p className="font-semibold text-brand-ink">Why buy with us?</p>
+            <p className="font-semibold text-brand-ink">Shipping & Returns</p>
             <ul className="mt-2 list-inside list-disc space-y-1">
-              <li>Secure payments and encrypted checkout</li>
-              <li>Fast shipping and tracking updates</li>
-              <li>30-day return policy</li>
+              <li>Fast shipping with tracking</li>
+              <li>30-day returns on eligible items</li>
+              <li>Secure checkout and encrypted payments</li>
             </ul>
           </div>
 
           <section>
             <h2 className="text-lg font-semibold">Description</h2>
-            <p className="mt-2 text-sm text-mutedText">{product.description ?? "No description available yet."}</p>
+            <p className="mt-2 text-sm text-mutedText">{product.description ?? "Detailed product copy will be updated as content becomes available."}</p>
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold">Specifications</h2>
+            <div className="mt-2 grid gap-2 text-sm text-mutedText">
+              <p><span className="font-medium text-brand-ink">Category:</span> {category}</p>
+              <p><span className="font-medium text-brand-ink">Condition:</span> {product.condition ?? "New"}</p>
+              <p><span className="font-medium text-brand-ink">Inventory status:</span> {stock > 0 ? "Available" : "Out of stock"}</p>
+            </div>
           </section>
         </div>
       </div>

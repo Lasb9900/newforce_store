@@ -15,6 +15,14 @@ type ShopFiltersProps = {
   className?: string;
 };
 
+function pretty(value: string) {
+  return value
+    .replaceAll(/[_-]+/g, " ")
+    .replaceAll(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export function ShopFilters({ categories, current, className }: ShopFiltersProps) {
   return (
     <aside className={className}>
@@ -30,7 +38,7 @@ export function ShopFilters({ categories, current, className }: ShopFiltersProps
             <select name="category" defaultValue={current.category} className="w-full rounded-lg border border-uiBorder bg-white px-3 py-2">
               <option value="">All categories</option>
               {categories.map((category) => (
-                <option key={category.slug} value={category.slug}>{category.name}</option>
+                <option key={category.slug} value={category.slug}>{pretty(category.name)}</option>
               ))}
             </select>
           </div>

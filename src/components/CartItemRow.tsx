@@ -1,8 +1,8 @@
 "use client";
 
-import Image from "next/image";
 import { CartItem } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
+import { ProductImage } from "@/components/ProductImage";
 
 export function CartItemRow({
   item,
@@ -21,14 +21,14 @@ export function CartItemRow({
   return (
     <article className="grid gap-3 rounded-xl border border-uiBorder bg-white p-3 md:grid-cols-[72px_1fr_auto] md:items-center">
       <div className="relative h-[72px] w-[72px] overflow-hidden rounded-md bg-surfaceMuted">
-        <Image src={item.imageUrl ?? "https://placehold.co/120x120?text=Item"} alt={item.name ?? "Product"} fill className="object-cover" sizes="72px" />
+        <ProductImage src={item.imageUrl} alt={item.name ?? "Product"} fill sizes="72px" className="object-cover" />
       </div>
 
       <div className="min-w-0">
         <p className="truncate font-semibold text-brand-ink">{item.name ?? "Product"}</p>
         <p className="text-xs text-mutedText">{item.variantName || item.sku || "Standard item"}</p>
         <p className="mt-1 text-sm text-mutedText">
-          Unit price: <span className="font-semibold text-brand-primary">{safeUnit ? formatCurrency(safeUnit) : "Price unavailable"}</span>
+          Unit price: <span className="font-semibold text-brand-primary">{safeUnit ? formatCurrency(safeUnit) : "Price finalized at checkout"}</span>
         </p>
         <p className="text-sm text-mutedText">Line total: <span className="font-semibold">{safeUnit ? formatCurrency(lineSubtotal) : "—"}</span></p>
         {lowStock ? <p className="mt-1 text-xs font-medium text-amber-700">Limited stock available for selected quantity.</p> : null}
@@ -41,7 +41,7 @@ export function CartItemRow({
             type="number"
             min={1}
             value={item.qty}
-            onChange={(e) => onQty(Math.max(1, Number(e.target.value) || 1))}
+            onChange={(event) => onQty(Math.max(1, Number(event.target.value) || 1))}
             className="w-12 border-x border-uiBorder p-1 text-center text-sm focus:outline-none"
             aria-label="Quantity"
           />

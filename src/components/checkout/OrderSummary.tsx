@@ -1,6 +1,6 @@
-import Image from "next/image";
 import { formatCurrency } from "@/lib/utils";
 import { CartItem } from "@/lib/types";
+import { ProductImage } from "@/components/ProductImage";
 
 export function OrderSummary({
   items,
@@ -27,7 +27,7 @@ export function OrderSummary({
       <div className="flex -space-x-2">
         {previewItems.map((item, index) => (
           <div key={`${item.productId}-${item.variantId}-${index}`} className="relative h-8 w-8 overflow-hidden rounded-full border border-uiBorder bg-surfaceMuted">
-            <Image src={item.imageUrl ?? "https://placehold.co/120x120?text=Item"} alt={item.name ?? "Product"} fill sizes="32px" className="object-cover" />
+            <ProductImage src={item.imageUrl} alt={item.name ?? "Product"} fill sizes="32px" className="object-cover" />
           </div>
         ))}
       </div>
