@@ -44,7 +44,7 @@ export default async function AdminOrders({
       .limit(300),
   ]);
 
-  let onlineResult = await supabase
+  const onlineResultWithReference = await supabase
     .from("orders")
     .select("id,buyer_email,total_cents,status,payment_status,payment_method,payment_reference,channel,created_at")
     .eq("status", "paid")
@@ -53,16 +53,16 @@ export default async function AdminOrders({
     .order("created_at", { ascending: false })
     .limit(300);
 
-  if (onlineResult.error?.message?.includes("column orders.payment_reference does not exist")) {
-    onlineResult = await supabase
-      .from("orders")
-      .select("id,buyer_email,total_cents,status,payment_status,payment_method,channel,created_at")
-      .eq("status", "paid")
-      .eq("payment_status", "paid")
-      .eq("channel", "online")
-      .order("created_at", { ascending: false })
-      .limit(300);
-  }
+  const onlineResult = onlineResultWithReference.error?.message?.includes("column orders.payment_reference does not exist")
+    ? await supabase
+        .from("orders")
+        .select("id,buyer_email,total_cents,status,payment_status,payment_method,channel,created_at")
+        .eq("status", "paid")
+        .eq("payment_status", "paid")
+        .eq("channel", "online")
+        .order("created_at", { ascending: false })
+        .limit(300)
+    : onlineResultWithReference;
 
   const onlineRows = (onlineResult.data ?? []) as OnlineOrderRow[];
   const posRows = posResult.data ?? [];

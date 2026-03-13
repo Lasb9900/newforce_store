@@ -30,6 +30,21 @@ export const createCheckoutSchema = z.object({
   shipping: checkoutShippingSchema,
 });
 
+export const cartValidationSchema = z.object({
+  items: z.array(cartItemSchema).min(1).max(25),
+});
+
+export const shippingRatesSchema = z.object({
+  items: z.array(cartItemSchema).min(1).max(25),
+  shipping: checkoutShippingSchema,
+});
+
+export const stripeCheckoutSchema = z.object({
+  items: z.array(cartItemSchema).min(1).max(25),
+  shipping: checkoutShippingSchema,
+  shipping_option_id: z.literal("standard"),
+});
+
 export const reviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
   comment: z.string().min(3).max(1000),

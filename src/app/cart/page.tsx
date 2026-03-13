@@ -19,6 +19,12 @@ type ShippingForm = {
   delivery_notes: string;
 };
 
+type ShippingOption = {
+  id: "standard";
+  name: string;
+  amount_cents: number;
+};
+
 type FieldErrors = Partial<Record<keyof ShippingForm, string>>;
 
 const initialShipping: ShippingForm = {
@@ -36,9 +42,13 @@ const initialShipping: ShippingForm = {
 
 export default function CartPage() {
   const { items, hydrate, updateQty, remove } = useCartStore();
-  const [loading, setLoading] = useState(false);
+  const [loadingCheckout, setLoadingCheckout] = useState(false);
+  const [loadingRates, setLoadingRates] = useState(false);
   const [shipping, setShipping] = useState<ShippingForm>(initialShipping);
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [subtotalCents, setSubtotalCents] = useState(0);
+  const [shippingOptions, setShippingOptions] = useState<ShippingOption[]>([]);
+  const [selectedShippingId, setSelectedShippingId] = useState<"standard" | "">("");
 
   useEffect(() => {
     hydrate();
@@ -65,12 +75,20 @@ export default function CartPage() {
     };
   }, []);
 
-  const subtotal = items.reduce((sum, i) => sum + (i.unitPriceCents ?? 0) * i.qty, 0);
-  const shippingCents = 0;
-  const taxCents = 0;
-  const total = subtotal + shippingCents + taxCents;
+  useEffect(() => {
+    setShippingOptions([]);
+    setSelectedShippingId("");
+  }, [shipping.address_line_1, shipping.city, shipping.state, shipping.postal_code, items]);
 
-  const canCheckout = useMemo(() => items.length > 0 && !loading, [items.length, loading]);
+  const selectedShipping = shippingOptions.find((option) => option.id === selectedShippingId) ?? null;
+  const shippingCents = selectedShipping?.amount_cents ?? 0;
+  const taxCents = 0;
+  const totalCents = subtotalCents + shippingCents + taxCents;
+
+  const canCheckout = useMemo(
+    () => items.length > 0 && !loadingCheckout && !!selectedShipping,
+    [items.length, loadingCheckout, selectedShipping],
+  );
 
   function validateShipping(form: ShippingForm) {
     const nextErrors: FieldErrors = {};
@@ -85,75 +103,96 @@ export default function CartPage() {
     return nextErrors;
   }
 
-  async function checkout() {
+  async function validateCart() {
+    const res = await fetch("/api/cart/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: items.map(({ productId, variantId, qty }) => ({ productId, variantId, qty })) }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json.error || "No se pudo validar carrito");
+    }
+    setSubtotalCents(json.subtotal_cents ?? 0);
+    return json;
+  }
+
+  async function fetchShippingRates() {
     const nextErrors = validateShipping(shipping);
     setErrors(nextErrors);
-
     if (Object.keys(nextErrors).length > 0) return;
-    if (!items.length) return;
 
-    setLoading(true);
-    const payload = {
-      items: items.map(({ productId, variantId, qty }) => ({ productId, variantId, qty })),
-      shipping,
-    };
-
-    const validation = await fetch("/api/checkout/validate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const validationJson = await validation.json();
-    const hasInvalid = (validationJson?.data ?? []).some((item: { valid: boolean }) => !item.valid);
-    if (hasInvalid) {
-      alert("Hay items sin stock o precio inválido");
-      setLoading(false);
-      return;
+    setLoadingRates(true);
+    try {
+      await validateCart();
+      const res = await fetch("/api/shipping/rates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: items.map(({ productId, variantId, qty }) => ({ productId, variantId, qty })),
+          shipping,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "No se pudo calcular shipping");
+      }
+      const options = (json.shipping_options ?? []) as ShippingOption[];
+      setShippingOptions(options);
+      setSelectedShippingId(options[0]?.id ?? "");
+    } catch (error) {
+      alert((error as Error).message);
+    } finally {
+      setLoadingRates(false);
     }
+  }
 
-    const response = await fetch("/api/stripe/checkout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const json = await response.json();
-    if (!response.ok) {
-      alert(json.error || "Error de checkout");
-      setLoading(false);
-      return;
+  async function checkout() {
+    if (!items.length || !selectedShipping) return;
+
+    const nextErrors = validateShipping(shipping);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
+    setLoadingCheckout(true);
+
+    try {
+      await validateCart();
+      const response = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: items.map(({ productId, variantId, qty }) => ({ productId, variantId, qty })),
+          shipping,
+          shipping_option_id: selectedShipping.id,
+        }),
+      });
+      const json = await response.json();
+      if (!response.ok) {
+        throw new Error(json.error || "Error de checkout");
+      }
+
+      if (json.url) {
+        window.location.href = json.url;
+      }
+    } catch (error) {
+      alert((error as Error).message);
+      setLoadingCheckout(false);
     }
-
-    if (json.url) window.location.href = json.url;
-    setLoading(false);
   }
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Checkout</h1>
-      <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-        <section className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm space-y-3">
-          <h2 className="text-lg font-semibold">1) Carrito</h2>
-          {!items.length ? <p className="text-sm text-mutedText">Tu carrito está vacío.</p> : null}
-          <div className="space-y-2">{items.map((item, index) => <CartItemRow key={`${item.productId}-${item.variantId}-${index}`} item={item} onQty={(qty) => updateQty(index, qty)} onRemove={() => remove(index)} />)}</div>
-        </section>
-
-        <aside className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm space-y-3 h-fit">
-          <h2 className="text-lg font-semibold">2) Resumen de compra</h2>
-          <div className="space-y-2 text-sm">
-            <div className="flex items-center justify-between"><span className="text-mutedText">Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
-            <div className="flex items-center justify-between"><span className="text-mutedText">Shipping</span><span>{shippingCents === 0 ? "Free" : formatCurrency(shippingCents)}</span></div>
-            <div className="flex items-center justify-between"><span className="text-mutedText">Tax</span><span>{formatCurrency(taxCents)}</span></div>
-            <div className="border-t border-uiBorder pt-2 flex items-center justify-between text-base font-bold"><span>Total</span><span className="text-brand-primary">{formatCurrency(total)}</span></div>
-          </div>
-          <button onClick={checkout} disabled={!canCheckout || Object.keys(validateShipping(shipping)).length > 0} className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-60">
-            {loading ? "Procesando..." : "Checkout"}
-          </button>
-          {loading ? <p className="text-xs text-mutedText">Redirecting to payment...</p> : null}
-        </aside>
-      </div>
 
       <section className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm space-y-3">
-        <h2 className="text-lg font-semibold">3) Datos de entrega (USA)</h2>
+        <h2 className="text-lg font-semibold">1) Carrito</h2>
+        {!items.length ? <p className="text-sm text-mutedText">Tu carrito está vacío.</p> : null}
+        <div className="space-y-2">{items.map((item, index) => <CartItemRow key={`${item.productId}-${item.variantId}-${index}`} item={item} onQty={(qty) => updateQty(index, qty)} onRemove={() => remove(index)} />)}</div>
+      </section>
+
+      <section className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm space-y-3">
+        <h2 className="text-lg font-semibold">2) Dirección de entrega (USA)</h2>
         <div className="grid gap-2 md:grid-cols-2">
           <div>
             <input className="w-full rounded border border-uiBorder p-2" placeholder="Full name" value={shipping.full_name} onChange={(e) => setShipping((s) => ({ ...s, full_name: e.target.value }))} />
@@ -193,6 +232,39 @@ export default function CartPage() {
           <textarea className="w-full rounded border border-uiBorder p-2 md:col-span-2" placeholder="Delivery notes (optional)" value={shipping.delivery_notes} onChange={(e) => setShipping((s) => ({ ...s, delivery_notes: e.target.value }))} />
         </div>
       </section>
+
+      <section className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm space-y-3">
+        <h2 className="text-lg font-semibold">3) Método de envío</h2>
+        <button onClick={fetchShippingRates} disabled={loadingRates || items.length === 0} className="btn-secondary disabled:cursor-not-allowed disabled:opacity-60">
+          {loadingRates ? "Calculando..." : "Calcular shipping"}
+        </button>
+        <div className="space-y-2">
+          {shippingOptions.map((option) => (
+            <label key={option.id} className="flex items-center justify-between rounded border border-uiBorder p-2 cursor-pointer">
+              <span className="flex items-center gap-2">
+                <input type="radio" name="shipping-option" checked={selectedShippingId === option.id} onChange={() => setSelectedShippingId(option.id)} />
+                {option.name}
+              </span>
+              <span>{option.amount_cents === 0 ? "Free" : formatCurrency(option.amount_cents)}</span>
+            </label>
+          ))}
+          {!shippingOptions.length ? <p className="text-sm text-mutedText">Calcula shipping para seleccionar el método.</p> : null}
+        </div>
+      </section>
+
+      <aside className="rounded-xl border border-uiBorder bg-surface p-4 shadow-sm space-y-3 h-fit">
+        <h2 className="text-lg font-semibold">4) Resumen de compra</h2>
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center justify-between"><span className="text-mutedText">Subtotal</span><span>{formatCurrency(subtotalCents)}</span></div>
+          <div className="flex items-center justify-between"><span className="text-mutedText">Shipping</span><span>{shippingCents === 0 ? "Free" : formatCurrency(shippingCents)}</span></div>
+          <div className="flex items-center justify-between"><span className="text-mutedText">Tax</span><span>{formatCurrency(taxCents)}</span></div>
+          <div className="border-t border-uiBorder pt-2 flex items-center justify-between text-base font-bold"><span>Total</span><span className="text-brand-primary">{formatCurrency(totalCents)}</span></div>
+        </div>
+        <button onClick={checkout} disabled={!canCheckout} className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-60">
+          {loadingCheckout ? "Procesando..." : "5) Ir a Checkout"}
+        </button>
+        {loadingCheckout ? <p className="text-xs text-mutedText">Redirigiendo a Stripe...</p> : null}
+      </aside>
     </div>
   );
 }
