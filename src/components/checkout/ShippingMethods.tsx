@@ -24,8 +24,9 @@ export function ShippingMethods({
       <button type="button" onClick={onCalculate} disabled={disabled || loading} className="btn-secondary disabled:opacity-60">
         {loading ? "Calculating..." : "Calculate shipping"}
       </button>
-      {message ? <p className="text-sm text-amber-700">{message}</p> : null}
-      <div className="space-y-2">
+      {message ? <p className="text-sm text-amber-700" role="status">{message}</p> : null}
+      {!options.length && !loading ? <p className="text-sm text-mutedText">No shipping options yet. Add address details and calculate.</p> : null}
+      <div className="space-y-2" role="radiogroup" aria-label="Shipping methods">
         {options.map((option) => (
           <label key={option.id} className="flex cursor-pointer items-start justify-between rounded-xl border border-uiBorder bg-white p-3">
             <span className="flex gap-2">

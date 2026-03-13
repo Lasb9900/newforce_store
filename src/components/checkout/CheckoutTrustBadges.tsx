@@ -1,4 +1,4 @@
-const BADGES = ["SSL Secure", "Secure Payment", "Stripe Protected", "Fast Shipping in USA"];
+const BADGES = ["🔒 Secure Checkout", "💳 Secure Payment", "⚡ Fast Shipping USA", "✔ Easy Returns"];
 
 export function CheckoutTrustBadges() {
   return (
