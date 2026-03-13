@@ -42,7 +42,7 @@ export const shippingRatesSchema = z.object({
 export const stripeCheckoutSchema = z.object({
   items: z.array(cartItemSchema).min(1).max(25),
   shipping: checkoutShippingSchema,
-  shipping_option_id: z.literal("standard"),
+  shipping_option_id: z.enum(["ups_ground", "ups_2day", "ups_next_day"]),
 });
 
 export const reviewSchema = z.object({

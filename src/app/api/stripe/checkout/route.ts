@@ -4,7 +4,8 @@ import { stripeCheckoutSchema } from "@/lib/schemas";
 import { getServerSupabase } from "@/lib/supabase";
 import { stripe } from "@/lib/stripe";
 import { env } from "@/lib/env";
-import { calculateShippingCents, calculateTaxCents, validateCartItems } from "@/lib/checkout";
+import { validateCartItems } from "@/lib/checkout";
+import { calculateTaxCents, resolveShippingOption } from "@/lib/shipping";
 
 export async function POST(req: Request) {
   const parsed = stripeCheckoutSchema.safeParse(await req.json());
@@ -23,7 +24,12 @@ export async function POST(req: Request) {
     } = await sb.auth.getUser();
 
     const validatedCart = await validateCartItems(sb, parsed.data.items);
-    const shippingCents = calculateShippingCents(validatedCart.subtotal_cents);
+    const selectedShipping = resolveShippingOption(validatedCart.subtotal_cents, parsed.data.shipping_option_id);
+    if (!selectedShipping) {
+      return NextResponse.json({ error: "Método de envío inválido" }, { status: 400 });
+    }
+
+    const shippingCents = selectedShipping.amount_cents;
     const taxCents = calculateTaxCents();
     const totalCents = validatedCart.subtotal_cents + shippingCents + taxCents;
 
@@ -100,7 +106,7 @@ export async function POST(req: Request) {
         price_data: {
           currency: "usd",
           unit_amount: shippingCents,
-          product_data: { name: "Standard Shipping" },
+          product_data: { name: selectedShipping.name },
         },
       });
     }

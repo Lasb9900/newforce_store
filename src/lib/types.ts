@@ -57,4 +57,6 @@ export type CartItem = {
   unitPriceCents?: number;
   imageUrl?: string;
   variantName?: string | null;
+  sku?: string | null;
+  availableStock?: number | null;
 };

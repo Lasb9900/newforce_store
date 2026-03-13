@@ -2,11 +2,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { cartItemSchema } from "@/lib/schemas";
 
-export const SHIPPING_RULES = {
-  freeShippingThresholdCents: 10_000,
-  standardShippingCents: 1_500,
-} as const;
-
 const cartItemsSchema = z.array(cartItemSchema).min(1).max(25);
 
 type CartInputItem = z.infer<typeof cartItemSchema>;
@@ -87,14 +82,3 @@ export async function validateCartItems(
   };
 }
 
-export function calculateShippingCents(subtotalCents: number) {
-  if (subtotalCents >= SHIPPING_RULES.freeShippingThresholdCents) {
-    return 0;
-  }
-
-  return SHIPPING_RULES.standardShippingCents;
-}
-
-export function calculateTaxCents() {
-  return 0;
-}

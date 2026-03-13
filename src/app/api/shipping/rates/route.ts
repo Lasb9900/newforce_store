@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { shippingRatesSchema } from "@/lib/schemas";
 import { getServerSupabase } from "@/lib/supabase";
-import { calculateShippingCents, validateCartItems } from "@/lib/checkout";
+import { validateCartItems } from "@/lib/checkout";
+import { buildShippingOptions } from "@/lib/shipping";
 
 export async function POST(req: Request) {
   const parsed = shippingRatesSchema.safeParse(await req.json());
@@ -12,16 +13,8 @@ export async function POST(req: Request) {
   try {
     const sb = await getServerSupabase();
     const cart = await validateCartItems(sb, parsed.data.items);
-    const shippingCents = calculateShippingCents(cart.subtotal_cents);
-
     return NextResponse.json({
-      shipping_options: [
-        {
-          id: "standard",
-          name: "Standard Shipping",
-          amount_cents: shippingCents,
-        },
-      ],
+      shipping_options: buildShippingOptions(cart.subtotal_cents),
     });
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 400 });

@@ -4,34 +4,53 @@ import Image from "next/image";
 import { CartItem } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 
-export function CartItemRow({ item, onQty, onRemove }: { item: CartItem; onQty: (qty: number) => void; onRemove: () => void }) {
-  const unit = item.unitPriceCents ?? 0;
-  const lineSubtotal = unit * item.qty;
+export function CartItemRow({
+  item,
+  onQty,
+  onRemove,
+}: {
+  item: CartItem;
+  onQty: (qty: number) => void;
+  onRemove: () => void;
+}) {
+  const unit = Number(item.unitPriceCents ?? 0);
+  const safeUnit = unit > 0 ? unit : null;
+  const lineSubtotal = (safeUnit ?? 0) * item.qty;
+  const lowStock = typeof item.availableStock === "number" && item.availableStock < item.qty;
 
   return (
-    <div className="grid gap-3 rounded-lg border border-uiBorder p-3 md:grid-cols-[72px_1fr_auto] md:items-center">
+    <article className="grid gap-3 rounded-xl border border-uiBorder bg-white p-3 md:grid-cols-[72px_1fr_auto] md:items-center">
       <div className="relative h-[72px] w-[72px] overflow-hidden rounded-md bg-surfaceMuted">
-        <Image src={item.imageUrl ?? "https://placehold.co/120x120?text=Product"} alt={item.name ?? "Producto"} fill className="object-cover" sizes="72px" />
+        <Image src={item.imageUrl ?? "https://placehold.co/120x120?text=Item"} alt={item.name ?? "Product"} fill className="object-cover" sizes="72px" />
       </div>
-      <div>
-        <p className="font-semibold text-brand-ink">{item.name ?? "Producto"}</p>
-        <p className="text-sm text-mutedText">{item.variantName ?? "Sin variante"}</p>
-        <p className="text-sm text-mutedText">Precio unitario: <span className="font-semibold text-brand-primary">{formatCurrency(unit)}</span></p>
-        <p className="text-sm text-mutedText">Subtotal: <span className="font-semibold">{formatCurrency(lineSubtotal)}</span></p>
+
+      <div className="min-w-0">
+        <p className="truncate font-semibold text-brand-ink">{item.name ?? "Product"}</p>
+        <p className="text-xs text-mutedText">{item.variantName || item.sku || "Standard item"}</p>
+        <p className="mt-1 text-sm text-mutedText">
+          Unit price: <span className="font-semibold text-brand-primary">{safeUnit ? formatCurrency(safeUnit) : "Price unavailable"}</span>
+        </p>
+        <p className="text-sm text-mutedText">Line total: <span className="font-semibold">{safeUnit ? formatCurrency(lineSubtotal) : "—"}</span></p>
+        {lowStock ? <p className="mt-1 text-xs font-medium text-amber-700">Limited stock available for selected quantity.</p> : null}
       </div>
+
       <div className="flex items-center gap-2">
-        <input
-          type="number"
-          min={1}
-          value={item.qty}
-          onChange={(e) => onQty(Math.max(1, Number(e.target.value) || 1))}
-          className="w-20 rounded-md border border-uiBorder p-2 text-sm focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/25"
-          aria-label="Cantidad"
-        />
-        <button onClick={onRemove} className="rounded-md px-2 py-1 text-sm font-medium text-red-600 hover:bg-red-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50">
-          Quitar
+        <div className="flex items-center rounded-lg border border-uiBorder">
+          <button type="button" onClick={() => onQty(Math.max(1, item.qty - 1))} className="px-2 py-1 text-sm hover:bg-surfaceMuted" aria-label="Decrease quantity">−</button>
+          <input
+            type="number"
+            min={1}
+            value={item.qty}
+            onChange={(e) => onQty(Math.max(1, Number(e.target.value) || 1))}
+            className="w-12 border-x border-uiBorder p-1 text-center text-sm focus:outline-none"
+            aria-label="Quantity"
+          />
+          <button type="button" onClick={() => onQty(item.qty + 1)} className="px-2 py-1 text-sm hover:bg-surfaceMuted" aria-label="Increase quantity">+</button>
+        </div>
+        <button onClick={onRemove} className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50">
+          Remove
         </button>
       </div>
-    </div>
+    </article>
   );
 }
