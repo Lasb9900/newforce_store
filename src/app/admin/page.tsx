@@ -33,9 +33,15 @@ export default async function AdminDashboard() {
     supabase.from("pos_sales").select("id,created_at,product_id,product_name,qty,total,payment_method,payment_reference,customer_email"),
   ]);
 
-  const onlineRows = onlineOrdersResult.data ?? [];
+  const onlineRows = (onlineOrdersResult.error?.message?.includes("column orders.channel does not exist")
+    ? (await supabase.from("orders").select("id,total_cents").eq("status", "paid").eq("payment_status", "paid")).data
+    : onlineOrdersResult.data) ?? [];
+
+  const onlineItems = (onlineItemsResult.error?.message?.includes("orders.channel")
+    ? (await supabase.from("order_items").select("product_id,name_snapshot,qty,line_total_cents,orders!inner(status,payment_status)").eq("orders.status", "paid").eq("orders.payment_status", "paid")).data
+    : onlineItemsResult.data) ?? [];
+
   const posRows = posRowsResult.data ?? [];
-  const onlineItems = onlineItemsResult.data ?? [];
 
   const onlineOrders = onlineRows.length;
   const physicalOrders = posRows.length;

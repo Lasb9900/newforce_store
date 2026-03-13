@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const schema = z.object({
+  SUPABASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().default("https://example.supabase.co"),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().default("dev-anon-key"),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
@@ -69,5 +70,6 @@ const parsedEnv = schema.parse(process.env);
 
 export const env = {
   ...parsedEnv,
+  SUPABASE_URL: parsedEnv.SUPABASE_URL ? normalizeSupabaseUrl(parsedEnv.SUPABASE_URL) : undefined,
   NEXT_PUBLIC_SUPABASE_URL: normalizeSupabaseUrl(parsedEnv.NEXT_PUBLIC_SUPABASE_URL),
 };

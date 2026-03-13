@@ -24,6 +24,8 @@ type SaleResult = {
   paymentReference: string | null;
   totalCents: number;
   createdAt: string;
+  loyaltyStatus: string | null;
+  loyaltyPointsAwarded: number;
 };
 
 const PAYMENT_METHODS = [
@@ -139,6 +141,8 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
         paymentReference: data.paymentReference ?? (paymentReference.trim() || null),
         totalCents: data.totalCents,
         createdAt: data.createdAt ?? new Date().toISOString(),
+        loyaltyStatus: data.loyaltyStatus ?? null,
+        loyaltyPointsAwarded: Number(data.loyaltyPointsAwarded ?? 0),
       });
       setLocalProducts((prev) => prev.map((p) => (p.id === selectedId ? { ...p, qty: Math.max(0, p.qty - qty) } : p)));
       setQty(1);
@@ -245,6 +249,10 @@ export default function PosForm({ products }: { products: PosProduct[] }) {
           <p>Método de pago: {PAYMENT_METHODS.find((m) => m.value === lastSale.paymentMethod)?.label ?? lastSale.paymentMethod}</p>
           <p>Referencia: {lastSale.paymentReference ?? "—"}</p>
           <p>Total: {formatCurrency(lastSale.totalCents)}</p>
+          <p>
+            Fidelidad: {lastSale.loyaltyStatus ?? "sin procesar"}
+            {lastSale.loyaltyPointsAwarded > 0 ? ` (+${lastSale.loyaltyPointsAwarded} pts)` : ""}
+          </p>
         </div>
       ) : null}
     </form>
