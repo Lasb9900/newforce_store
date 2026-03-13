@@ -53,7 +53,7 @@ export function AddToCart({ product }: { product: Product }) {
           onClick={async () => {
             await initialize();
             await addItem({
-              productId: variant ? undefined : product.id,
+              productId: product.id,
               variantId: variant?.id,
               qty,
               name: displayName,

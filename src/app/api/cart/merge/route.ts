@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireUserApi } from "@/lib/auth";
-import { loadUserCart, normalizeCartItems, saveUserCart } from "@/lib/cart-server";
+import { CartApiError, loadUserCart, normalizeCartItems, saveUserCart } from "@/lib/cart-server";
 
 const bodySchema = z.object({
-  guestItems: z.array(z.object({ productId: z.string().uuid().optional(), variantId: z.string().uuid().optional(), qty: z.number().int().min(1).max(999) })).max(25),
+  guestItems: z.array(z.object({ productId: z.string().uuid(), variantId: z.string().uuid().optional(), qty: z.number().int().min(1).max(999) })).max(25),
 });
 
 export async function POST(req: Request) {
@@ -26,6 +26,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ data: merged.items, notices });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to merge cart" }, { status: 500 });
+    const known = error instanceof CartApiError ? error : null;
+    const status = known?.code === "23503" ? 404 : known?.code === "23514" ? 409 : 500;
+    return NextResponse.json({ error: "Failed to merge cart", ...(process.env.NODE_ENV !== "production" ? { message: error instanceof Error ? error.message : "Unknown", step: known?.step ?? "merge_cart", code: known?.code ?? null } : null) }, { status });
   }
 }

@@ -57,7 +57,10 @@ function enqueueOperation(task: () => Promise<void>) {
 
 async function fetchServerCart() {
   const response = await fetch("/api/cart", { cache: "no-store" });
-  if (!response.ok) throw new Error("Failed to load account cart");
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string; message?: string } | null;
+    throw new Error(payload?.message ?? payload?.error ?? "Failed to load account cart");
+  }
   return (await response.json()) as { data: CartItem[]; notices?: CartNotice[] };
 }
 
@@ -67,7 +70,10 @@ async function persistServerCart(items: CartItem[]) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ items: items.map(({ productId, variantId, qty }) => ({ productId, variantId, qty })) }),
   });
-  if (!response.ok) throw new Error("Failed to update account cart");
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string; message?: string } | null;
+    throw new Error(payload?.message ?? payload?.error ?? "Failed to update account cart");
+  }
   return (await response.json()) as { data: CartItem[]; notices?: CartNotice[] };
 }
 
@@ -77,7 +83,10 @@ async function mergeGuestIntoServer(guestItems: CartItem[]) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ guestItems: guestItems.map(({ productId, variantId, qty }) => ({ productId, variantId, qty })) }),
   });
-  if (!response.ok) throw new Error("Failed to merge guest cart");
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string; message?: string } | null;
+    throw new Error(payload?.message ?? payload?.error ?? "Failed to merge guest cart");
+  }
   return (await response.json()) as { data: CartItem[]; notices?: CartNotice[] };
 }
 
@@ -118,8 +127,8 @@ export const useCartStore = create<CartState>((set, get) => ({
 
         const serverCart = await fetchServerCart();
         set({ items: serverCart.data, notice: serverCart.notices?.[0] ?? null });
-      } catch {
-        set({ items: nextUserId ? [] : readGuestCart(), notice: { type: "warning", message: "Could not sync your cart. Please retry." } });
+      } catch (error) {
+        set({ items: nextUserId ? [] : readGuestCart(), notice: { type: "warning", message: error instanceof Error ? error.message : "Could not sync your cart. Please retry." } });
       } finally {
         set({ syncing: false });
       }
