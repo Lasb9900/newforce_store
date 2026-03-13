@@ -3,7 +3,7 @@ import { getServerSupabase } from "@/lib/supabase";
 
 export type PosSaleRow = {
   sale_id: string;
-  order_id?: string | null;
+  legacy_order_id?: string | null;
   cash_closure_id?: string | null;
   created_at: string;
   product_name: string;
@@ -50,56 +50,100 @@ export async function fetchPosSalesRange(
 ) {
   const service = await getServerSupabase();
 
-  let selectColumns = "id,order_id,cash_closure_id,created_at,product_name,item_number,qty,price,total,payment_method,payment_reference,customer_email,customer_user_id,loyalty_status,loyalty_points_awarded,loyalty_error";
+  const baseColumns = [
+    "id",
+    "created_at",
+    "product_name",
+    "item_number",
+    "qty",
+    "price",
+    "total",
+    "payment_method",
+    "payment_reference",
+    "customer_email",
+  ];
 
-  const runQuery = async () => {
+  const optionalColumns = {
+    cash_closure_id: true,
+    customer_user_id: true,
+    loyalty_status: true,
+    loyalty_points_awarded: true,
+    loyalty_error: true,
+    order_id: true,
+  };
+
+  const buildSelectColumns = () => [
+    ...baseColumns,
+    ...(optionalColumns.cash_closure_id ? ["cash_closure_id"] : []),
+    ...(optionalColumns.customer_user_id ? ["customer_user_id"] : []),
+    ...(optionalColumns.loyalty_status ? ["loyalty_status"] : []),
+    ...(optionalColumns.loyalty_points_awarded ? ["loyalty_points_awarded"] : []),
+    ...(optionalColumns.loyalty_error ? ["loyalty_error"] : []),
+    ...(optionalColumns.order_id ? ["order_id"] : []),
+  ].join(",");
+
+  let posRows: Array<Record<string, unknown>> = [];
+  let queryError: { message?: string } | null = null;
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
     let query = service
       .from("pos_sales")
-      .select(selectColumns)
+      .select(buildSelectColumns())
       .gte("created_at", fromDateIso)
       .lte("created_at", toDateIso)
       .order("created_at", { ascending: false });
 
-    if (saleIdQuery?.trim()) {
-      const id = saleIdQuery.trim();
-      query = query.eq("id", id);
-    }
-
-    if (pendingOnly) {
+    if (pendingOnly && optionalColumns.cash_closure_id) {
       query = query.is("cash_closure_id", null);
     }
 
-    return query;
-  };
+    if (saleIdQuery?.trim()) {
+      query = query.eq("id", saleIdQuery.trim());
+    }
 
-  let { data: posRows, error } = await runQuery();
+    const result = await query;
+    if (!result.error) {
+      posRows = ((result.data ?? []) as unknown as Array<Record<string, unknown>>);
+      queryError = null;
+      break;
+    }
 
-  if (error?.message?.includes("column pos_sales.order_id does not exist")) {
-    selectColumns = "id,cash_closure_id,created_at,product_name,item_number,qty,price,total,payment_method,payment_reference,customer_email,customer_user_id,loyalty_status,loyalty_points_awarded,loyalty_error";
-    const fallback = await runQuery();
-    posRows = fallback.data;
-    error = fallback.error;
+    queryError = { message: result.error.message };
+    const msg = result.error.message ?? "";
+
+    if (msg.includes("column pos_sales.cash_closure_id does not exist")) {
+      optionalColumns.cash_closure_id = false;
+      continue;
+    }
+    if (msg.includes("column pos_sales.customer_user_id does not exist")) {
+      optionalColumns.customer_user_id = false;
+      continue;
+    }
+    if (msg.includes("column pos_sales.loyalty_status does not exist")) {
+      optionalColumns.loyalty_status = false;
+      continue;
+    }
+    if (msg.includes("column pos_sales.loyalty_points_awarded does not exist")) {
+      optionalColumns.loyalty_points_awarded = false;
+      continue;
+    }
+    if (msg.includes("column pos_sales.loyalty_error does not exist")) {
+      optionalColumns.loyalty_error = false;
+      continue;
+    }
+    if (msg.includes("column pos_sales.order_id does not exist")) {
+      optionalColumns.order_id = false;
+      continue;
+    }
+
+    break;
   }
 
-  if (error?.message?.includes("column pos_sales.cash_closure_id does not exist")) {
-    selectColumns = "id,created_at,product_name,item_number,qty,price,total,payment_method,payment_reference,customer_email,customer_user_id,loyalty_status,loyalty_points_awarded,loyalty_error";
-    const fallback = await runQuery();
-    posRows = fallback.data;
-    error = fallback.error;
-  }
+  if (queryError) return { data: [] as PosSaleRow[], error: queryError as Error };
 
-  if (error?.message?.includes("column pos_sales.customer_user_id does not exist")) {
-    selectColumns = "id,order_id,cash_closure_id,created_at,product_name,item_number,qty,price,total,payment_method,payment_reference,customer_email";
-    const fallback = await runQuery();
-    posRows = fallback.data;
-    error = fallback.error;
-  }
-
-  if (error) return { data: [] as PosSaleRow[], error };
-
-  const rows: PosSaleRow[] = (((posRows ?? []) as unknown) as Array<Record<string, unknown>>).map((row) => ({
+  const rows: PosSaleRow[] = posRows.map((row) => ({
     sale_id: String(row.id ?? ""),
-    order_id: row.order_id ? String(row.order_id) : null,
+    legacy_order_id: row.order_id ? String(row.order_id) : null,
     cash_closure_id: row.cash_closure_id ? String(row.cash_closure_id) : null,
     created_at: String(row.created_at ?? ""),
     product_name: String(row.product_name ?? ""),
@@ -119,47 +163,40 @@ export async function fetchPosSalesRange(
   const filtered = rows.filter((row) => {
     if (paymentMethod && row.payment_method !== paymentMethod) return false;
     if (productQuery && !row.product_name.toLowerCase().includes(productQuery.toLowerCase())) return false;
-    if (saleIdQuery && !`${row.sale_id}`.toLowerCase().includes(saleIdQuery.toLowerCase())) return false;
+    if (saleIdQuery) {
+      const q = saleIdQuery.toLowerCase();
+      const bySaleId = row.sale_id.toLowerCase().includes(q);
+      const byLegacyOrderId = (row.legacy_order_id ?? "").toLowerCase().includes(q);
+      if (!bySaleId && !byLegacyOrderId) return false;
+    }
+    if (pendingOnly && optionalColumns.cash_closure_id && row.cash_closure_id) return false;
     return true;
   });
 
-  const orderIds = filtered.map((row) => row.order_id).filter((orderId): orderId is string => Boolean(orderId));
-  if (orderIds.length) {
-    const { data: loyaltyRows, error: loyaltyError } = await service
-      .from("loyalty_transactions")
-      .select("source_id,status,points_delta")
-      .eq("source_type", "pos_sale")
-      .in("source_id", orderIds);
-
-    if (loyaltyError) {
-      return {
-        data: filtered.map((row) => ({
-          ...row,
-          loyalty_status: row.loyalty_status ?? null,
-          loyalty_points: row.loyalty_points ?? 0,
-          loyalty_error: row.loyalty_error ?? null,
-        })),
-        error: null,
-      };
-    }
-
-    const loyaltyByOrderId = new Map(
-      (loyaltyRows ?? []).map((entry) => [String(entry.source_id), { status: entry.status, points: Number(entry.points_delta ?? 0) }]),
-    );
-
-    return {
-      data: filtered.map((row) => {
-        const loyalty = row.order_id ? loyaltyByOrderId.get(row.order_id) : null;
-        return {
-          ...row,
-          loyalty_status: row.loyalty_status ?? loyalty?.status ?? null,
-          loyalty_points: row.loyalty_points ?? loyalty?.points ?? 0,
-          loyalty_error: row.loyalty_error ?? null,
-        };
-      }),
-      error: null,
-    };
+  const saleIds = filtered.map((row) => row.sale_id).filter(Boolean);
+  if (!saleIds.length) {
+    return { data: filtered, error: null };
   }
 
-  return { data: filtered, error: null };
+  const { data: loyaltyRows } = await service
+    .from("loyalty_transactions")
+    .select("source_id,status,points_delta")
+    .eq("source_type", "pos_sale")
+    .in("source_id", saleIds);
+
+  const loyaltyBySaleId = new Map(
+    (loyaltyRows ?? []).map((entry) => [String(entry.source_id), { status: String(entry.status), points: Number(entry.points_delta ?? 0) }]),
+  );
+
+  return {
+    data: filtered.map((row) => {
+      const loyalty = loyaltyBySaleId.get(row.sale_id);
+      return {
+        ...row,
+        loyalty_status: row.loyalty_status ?? loyalty?.status ?? null,
+        loyalty_points: Number(row.loyalty_points ?? loyalty?.points ?? 0),
+      };
+    }),
+    error: null,
+  };
 }

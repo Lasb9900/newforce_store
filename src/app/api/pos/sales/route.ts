@@ -14,8 +14,6 @@ type RpcArrayShape = {
   payment_reference?: string | null;
 };
 
-type RpcObjectShape = RpcArrayShape;
-
 type NormalizedSaleResult = {
   saleId: string;
   orderId: string | null;
@@ -24,38 +22,6 @@ type NormalizedSaleResult = {
   pointsEarned: number;
   paymentReference: string | null;
 };
-
-async function resolveTotalCents(db: {
-  from: (table: string) => {
-    select: (columns: string) => {
-      eq: (column: string, value: string) => {
-        maybeSingle: () => Promise<{ data: Record<string, unknown> | null }>;
-      };
-    };
-  };
-}, orderId: string | null): Promise<number | null> {
-  if (!orderId) return null;
-
-  const { data: order } = await db
-    .from("orders")
-    .select("total_cents")
-    .eq("id", orderId)
-    .maybeSingle();
-
-  const total = Number((order?.total_cents as number | undefined) ?? 0);
-  if (Number.isFinite(total) && total > 0) return total;
-
-  const { data: lines } = await db
-    .from("order_items")
-    .select("line_total_cents,qty,unit_price_cents_snapshot")
-    .eq("order_id", orderId)
-    .maybeSingle();
-
-  const fallback =
-    Number((lines?.line_total_cents as number | undefined) ?? 0) ||
-    Number((lines?.unit_price_cents_snapshot as number | undefined) ?? 0) * Number((lines?.qty as number | undefined) ?? 0);
-  return Number.isFinite(fallback) ? fallback : null;
-}
 
 const VALID_PAYMENT_METHODS = new Set(["cash", "card", "transfer"]);
 const BUSINESS_ERROR_CODES = new Set([
@@ -102,7 +68,7 @@ function getClientMessage(codeOrMessage: string) {
   }
 }
 
-function pickRpcObject(rawData: unknown): RpcObjectShape | null {
+function pickRpcObject(rawData: unknown): RpcArrayShape | null {
   if (Array.isArray(rawData)) {
     const first = rawData[0] as RpcArrayShape | undefined;
     if (!first || typeof first !== "object") return null;
@@ -110,105 +76,142 @@ function pickRpcObject(rawData: unknown): RpcObjectShape | null {
   }
 
   if (rawData && typeof rawData === "object") {
-    return rawData as RpcObjectShape;
+    return rawData as RpcArrayShape;
   }
 
   return null;
 }
 
-async function normalizeRpcResult(rawData: unknown, supabase: unknown): Promise<NormalizedSaleResult | null> {
-  const db = supabase as {
-    from: (table: string) => {
-      select: (columns: string) => {
-        eq: (column: string, value: string) => {
-          maybeSingle: () => Promise<{ data: Record<string, unknown> | null }>;
-        };
-      };
-    };
-  };
+async function fetchPosSaleById(db: ReturnType<typeof getServiceSupabase>, saleId: string) {
+  const { data } = await db
+    .from("pos_sales")
+    .select("id,created_at,total,payment_reference")
+    .eq("id", saleId)
+    .maybeSingle();
 
+  return data
+    ? {
+        saleId: String(data.id),
+        createdAt: String(data.created_at ?? ""),
+        totalCents: Number(data.total ?? 0),
+        paymentReference: (data.payment_reference as string | null) ?? null,
+      }
+    : null;
+}
+
+async function fetchPosSaleByOrderId(db: ReturnType<typeof getServiceSupabase>, orderId: string) {
+  const { data, error } = await db
+    .from("pos_sales")
+    .select("id,created_at,total,payment_reference,order_id")
+    .eq("order_id", orderId)
+    .maybeSingle();
+
+  if (error?.message?.includes("column pos_sales.order_id does not exist")) {
+    return null;
+  }
+
+  return data
+    ? {
+        saleId: String(data.id),
+        createdAt: String(data.created_at ?? ""),
+        totalCents: Number(data.total ?? 0),
+        paymentReference: (data.payment_reference as string | null) ?? null,
+      }
+    : null;
+}
+
+async function normalizeRpcResult(rawData: unknown, db: ReturnType<typeof getServiceSupabase>): Promise<NormalizedSaleResult | null> {
   const payload = pickRpcObject(rawData);
   if (!payload) return null;
 
   const rpcSaysSuccess = payload.success === undefined || payload.success === true;
-  const candidateId = payload.order_id ?? payload.sale_id ?? null;
+  if (!rpcSaysSuccess) return null;
 
-  if (!rpcSaysSuccess || !candidateId) {
-    return null;
+  const directSaleId = payload.sale_id ?? null;
+  const directOrderId = payload.order_id ?? null;
+
+  if (directSaleId) {
+    const bySaleId = await fetchPosSaleById(db, directSaleId);
+    if (bySaleId) {
+      return {
+        saleId: bySaleId.saleId,
+        orderId: directOrderId,
+        createdAt: payload.created_at ?? bySaleId.createdAt,
+        totalCents: payload.total_cents ?? bySaleId.totalCents,
+        pointsEarned: payload.points_earned ?? 0,
+        paymentReference: payload.payment_reference ?? bySaleId.paymentReference,
+      };
+    }
   }
 
-  // Rich table-return shape (already includes totals)
-  if (payload.order_id && payload.created_at && payload.total_cents != null) {
-    return {
-      saleId: payload.sale_id ?? payload.order_id,
-      orderId: payload.order_id,
-      createdAt: payload.created_at,
-      totalCents: payload.total_cents,
-      pointsEarned: payload.points_earned ?? 0,
-      paymentReference: payload.payment_reference ?? null,
-    };
+  if (directOrderId) {
+    const byOrderId = await fetchPosSaleByOrderId(db, directOrderId);
+    if (byOrderId) {
+      return {
+        saleId: byOrderId.saleId,
+        orderId: directOrderId,
+        createdAt: payload.created_at ?? byOrderId.createdAt,
+        totalCents: payload.total_cents ?? byOrderId.totalCents,
+        pointsEarned: payload.points_earned ?? 0,
+        paymentReference: payload.payment_reference ?? byOrderId.paymentReference,
+      };
+    }
   }
 
-  // Object shape may return sale_id that is actually orders.id OR pos_sales.id depending on DB function version.
-  const { data: orderById } = await db
-    .from("orders")
-    .select("id,created_at,total_cents,points_earned,payment_reference")
-    .eq("id", candidateId)
-    .maybeSingle();
+  return null;
+}
 
-  if (orderById) {
-    return {
-      saleId: payload.sale_id ?? String(orderById.id),
-      orderId: String(orderById.id),
-      createdAt: String(orderById.created_at ?? ""),
-      totalCents: Number(orderById.total_cents ?? 0),
-      pointsEarned: Number(orderById.points_earned ?? 0),
-      paymentReference: (orderById.payment_reference as string | null) ?? null,
-    };
-  }
+async function updatePosSaleLoyaltySnapshot(input: {
+  saleId: string;
+  userId: string | null;
+  status: string;
+  points: number;
+  loyaltyError: string | null;
+}) {
+  const service = getServiceSupabase();
 
-  const { data: posSaleRow } = await db
-    .from("pos_sales")
-    .select("id,order_id,created_at,total,payment_reference")
-    .eq("id", candidateId)
-    .maybeSingle();
-
-  if (posSaleRow) {
-    // We still return success to avoid false 500 + duplicate retries.
-    return {
-      saleId: String(posSaleRow.id),
-      orderId: (posSaleRow.order_id as string | null) ?? null,
-      createdAt: String(posSaleRow.created_at ?? ""),
-      totalCents: Number(posSaleRow.total ?? 0),
-      pointsEarned: 0,
-      paymentReference: (posSaleRow.payment_reference as string | null) ?? null,
-    };
-  }
-
-  // Last-resort success normalization for legacy RPC object payload.
-  return {
-    saleId: candidateId,
-    orderId: payload.order_id ?? null,
-    createdAt: payload.created_at ?? null,
-    totalCents: payload.total_cents ?? null,
-    pointsEarned: payload.points_earned ?? 0,
-    paymentReference: payload.payment_reference ?? null,
+  const payload = {
+    customer_user_id: input.userId,
+    loyalty_status: input.status,
+    loyalty_points_awarded: Math.max(0, Math.floor(input.points ?? 0)),
+    loyalty_error: input.loyaltyError,
   };
+
+  const { error } = await service.from("pos_sales").update(payload).eq("id", input.saleId);
+
+  if (!error) return;
+
+  const msg = error.message ?? "";
+  if (msg.includes("column pos_sales.customer_user_id does not exist")) {
+    await service
+      .from("pos_sales")
+      .update({ loyalty_status: input.status, loyalty_points_awarded: payload.loyalty_points_awarded, loyalty_error: input.loyaltyError })
+      .eq("id", input.saleId);
+    return;
+  }
+
+  if (msg.includes("column pos_sales.loyalty_status does not exist")) {
+    return;
+  }
+
+  logError("Unable to persist POS loyalty snapshot", {
+    saleId: input.saleId,
+    userId: input.userId,
+    status: input.status,
+    loyaltyError: input.loyaltyError,
+    error,
+  });
 }
 
 export async function POST(req: Request) {
-  logInfo("Starting sale creation");
-
   const auth = await requireSellerApi();
   if ("error" in auth) {
-    logError("Unauthorized seller attempt");
     return auth.error;
   }
 
   const requestBody = await req.json();
   const parsed = createPosSaleSchema.safeParse(requestBody);
   if (!parsed.success) {
-    logError("Invalid payload", { issues: parsed.error.issues });
     return NextResponse.json({ error: "Payload inválido", details: parsed.error.flatten(), code: "INVALID_PAYLOAD" }, { status: 400 });
   }
 
@@ -216,80 +219,31 @@ export async function POST(req: Request) {
   const paymentReference = parsed.data.paymentReference?.trim() || null;
 
   if (!VALID_PAYMENT_METHODS.has(paymentMethod)) {
-    logError("Invalid payment method", { paymentMethod });
     return NextResponse.json({ error: "Método de pago inválido", code: "INVALID_PAYMENT_METHOD" }, { status: 400 });
   }
 
   if ((paymentMethod === "transfer" || paymentMethod === "card") && !paymentReference) {
-    logError("Missing required payment reference", { paymentMethod });
     return NextResponse.json({ error: "La referencia de pago es obligatoria para tarjeta y transferencia", code: "PAYMENT_REFERENCE_REQUIRED" }, { status: 400 });
   }
 
   const item = parsed.data.items[0];
   if (!item?.productId) {
-    logError("Missing product id in sale item");
     return NextResponse.json({ error: "Producto no informado", code: "PRODUCT_ID_REQUIRED" }, { status: 400 });
   }
   if (!item?.qty || item.qty <= 0) {
-    logError("Invalid quantity", { qty: item?.qty });
     return NextResponse.json({ error: "Cantidad inválida", code: "INVALID_QTY" }, { status: 400 });
   }
 
-  logInfo("Payload normalized", {
-    sellerId: auth.user.id,
-    productId: item.productId,
-    qty: item.qty,
-    paymentMethod,
-    hasPaymentReference: Boolean(paymentReference),
-    hasCustomerEmail: Boolean(parsed.data.customerEmail),
-  });
-
-  const { data: currentProduct, error: productReadError } = await auth.supabase
-    .from("products")
-    .select("id,name,qty,base_stock,active")
-    .eq("id", item.productId)
-    .maybeSingle();
-
-  if (productReadError) {
-    logError("Failed to read current product stock before RPC", { productReadError, productId: item.productId });
-  } else {
-    logInfo("Current DB stock snapshot", {
-      productId: item.productId,
-      qty: currentProduct?.qty,
-      baseStock: currentProduct?.base_stock,
-      operationalStock:
-        currentProduct
-          ? Math.min(
-              currentProduct.qty ?? Number.POSITIVE_INFINITY,
-              currentProduct.base_stock ?? Number.POSITIVE_INFINITY,
-            )
-          : null,
-      active: currentProduct?.active,
-    });
-  }
-
   const customerEmail = parsed.data.customerEmail?.trim().toLowerCase() ?? null;
-  let customerId: string | null = null;
+  let customerUserId: string | null = null;
 
   if (customerEmail) {
     try {
       const service = getServiceSupabase();
-      const { data: profile, error: profileError } = await service
-        .from("profiles")
-        .select("user_id")
-        .eq("email", customerEmail)
-        .maybeSingle();
-
-      if (profileError) {
-        logError("Customer profile lookup failed", { customerEmail, profileError });
-      }
-
-      customerId = profile?.user_id ?? null;
-    } catch (lookupError) {
-      logError("Customer profile lookup exception", {
-        customerEmail,
-        lookupError: lookupError instanceof Error ? lookupError.message : String(lookupError),
-      });
+      const { data: profile } = await service.from("profiles").select("user_id").ilike("email", customerEmail).maybeSingle();
+      customerUserId = profile?.user_id ?? null;
+    } catch (error) {
+      logError("Customer lookup failed", { customerEmail, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -297,122 +251,98 @@ export async function POST(req: Request) {
     productId: item.productId,
     qty: item.qty,
     paymentMethod,
+    customerEmail,
+    customerUserId,
   });
 
-  const { data, error } = await auth.supabase.rpc("create_pos_sale", {
+  const { data: rawRpcData, error: rpcError } = await auth.supabase.rpc("create_pos_sale", {
     p_product_id: item.productId,
     p_qty: item.qty,
     p_payment_method: paymentMethod,
     p_payment_reference: paymentReference,
     p_customer_email: customerEmail,
     p_sold_by: auth.user.id,
-    p_customer_id: customerId,
+    p_customer_id: customerUserId,
   });
 
-  if (error) {
-    const code = error.message || "INTERNAL_POS_SALE_ERROR";
+  if (rpcError) {
+    const code = rpcError.message || "INTERNAL_POS_SALE_ERROR";
     const status = BUSINESS_ERROR_CODES.has(code) ? 400 : 500;
-
-    logError("RPC create_pos_sale failed", {
-      businessCode: code,
-      details: error.details,
-      hint: error.hint,
-      sqlState: error.code,
-      rpcResponseData: data,
-    });
-
-    if ((error.message || "").includes("Could not find the function public.create_pos_sale")) {
-      return NextResponse.json(
-        {
-          error:
-            "La función RPC create_pos_sale no está sincronizada en Supabase. Ejecuta las migraciones POS más recientes y recarga schema cache (notify pgrst, 'reload schema').",
-          code: "RPC_NOT_FOUND",
-          details: error.message,
-        },
-        { status: 500 },
-      );
-    }
 
     return NextResponse.json(
       {
         error: getClientMessage(code),
         code,
-        details: error.details,
-        hint: error.hint,
-        sqlState: error.code,
+        details: rpcError.details,
+        hint: rpcError.hint,
+        sqlState: rpcError.code,
       },
       { status },
     );
   }
 
-  logInfo("Raw RPC success payload", {
-    isArray: Array.isArray(data),
-    payloadKeys: data && typeof data === "object" ? Object.keys(data as Record<string, unknown>) : [],
-    data,
-  });
+  let service: ReturnType<typeof getServiceSupabase>;
+  try {
+    service = getServiceSupabase();
+  } catch {
+    return NextResponse.json({ error: "No se pudo inicializar servicio POS", code: "SERVICE_NOT_AVAILABLE" }, { status: 500 });
+  }
 
-  const normalized = await normalizeRpcResult(data, auth.supabase);
+  const normalized = await normalizeRpcResult(rawRpcData, service);
   if (!normalized) {
-    logError("RPC returned no error but unsupported payload shape", { data });
     return NextResponse.json(
       {
-        error: "No se pudo registrar la venta: respuesta no reconocida del motor transaccional",
+        error: "No se pudo identificar el ID real de la venta POS para procesar fidelidad",
         code: "UNSUPPORTED_RPC_RESPONSE",
       },
       { status: 500 },
     );
   }
 
-  const resolvedTotalCents =
-    normalized.totalCents != null
-      ? normalized.totalCents
-      : await resolveTotalCents(
-          auth.supabase as unknown as {
-            from: (table: string) => {
-              select: (columns: string) => {
-                eq: (column: string, value: string) => {
-                  maybeSingle: () => Promise<{ data: Record<string, unknown> | null }>;
-                };
-              };
-            };
-          },
-          normalized.orderId,
-        );
+  const resolvedTotalCents = normalized.totalCents ?? 0;
 
-  logInfo("Sale committed in DB transaction", {
-    saleId: normalized.saleId,
-    orderId: normalized.orderId,
-    totalCents: resolvedTotalCents,
-    pointsEarned: normalized.pointsEarned,
-  });
-
-  let loyaltyStatus: string | null = null;
+  let loyaltyStatus = "pending";
   let loyaltyPointsAwarded = 0;
 
-  if (normalized.orderId) {
-    const { data: loyaltyData, error: loyaltyError } = await processLoyaltyAccrual({
-      sourceType: "pos_sale",
-      sourceId: normalized.orderId,
-      userId: customerId,
-      email: customerEmail,
-      amountCents: resolvedTotalCents ?? 0,
-      metadata: {
-        channel: "physical_store",
-        seller_id: auth.user.id,
-        payment_method: paymentMethod,
-      },
-    });
+  const { data: loyaltyData, error: loyaltyError } = await processLoyaltyAccrual({
+    sourceType: "pos_sale",
+    sourceId: normalized.saleId,
+    userId: customerUserId,
+    email: customerEmail,
+    amountCents: resolvedTotalCents,
+    metadata: {
+      channel: "physical_store",
+      sale_id: normalized.saleId,
+      order_id: normalized.orderId,
+      seller_id: auth.user.id,
+      payment_method: paymentMethod,
+    },
+  });
 
-    if (loyaltyError) {
-      logError("process_loyalty_accrual failed after POS sale commit", {
-        orderId: normalized.orderId,
-        loyaltyError,
-      });
-      loyaltyStatus = "error";
-    } else {
-      loyaltyStatus = loyaltyData?.status ?? "error";
-      loyaltyPointsAwarded = loyaltyData?.points_awarded ?? 0;
-    }
+  if (loyaltyError) {
+    loyaltyStatus = "error";
+    await updatePosSaleLoyaltySnapshot({
+      saleId: normalized.saleId,
+      userId: customerUserId,
+      status: "error",
+      points: 0,
+      loyaltyError: loyaltyError.message,
+    });
+    logError("process_loyalty_accrual failed after POS sale commit", {
+      saleId: normalized.saleId,
+      loyaltyError,
+    });
+  } else {
+    loyaltyStatus = loyaltyData?.status ?? "error";
+    loyaltyPointsAwarded = Number(loyaltyData?.points_awarded ?? 0);
+
+    await updatePosSaleLoyaltySnapshot({
+      saleId: normalized.saleId,
+      userId: loyaltyData?.resolved_user_id ?? customerUserId,
+      status: loyaltyStatus,
+      points: loyaltyPointsAwarded,
+      loyaltyError: loyaltyStatus === "error" ? "Error loyalty no especificado" : null,
+    });
   }
 
   return NextResponse.json(
@@ -421,7 +351,6 @@ export async function POST(req: Request) {
       saleId: normalized.saleId,
       orderId: normalized.orderId,
       productId: item.productId,
-      productName: currentProduct?.name ?? null,
       pointsEarned: normalized.pointsEarned,
       totalCents: resolvedTotalCents,
       createdAt: normalized.createdAt,

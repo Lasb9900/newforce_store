@@ -74,14 +74,14 @@ export default async function AdminPosSalesPage({
           <table className="min-w-full text-sm">
             <thead className="bg-surfaceMuted text-left">
               <tr>
-                <th className="p-2">Fecha</th><th className="p-2">Order ID</th><th className="p-2">Producto</th><th className="p-2">Item #</th><th className="p-2">Cantidad</th><th className="p-2">Precio</th><th className="p-2">Total</th><th className="p-2">Método</th><th className="p-2">Referencia</th><th className="p-2">Email</th><th className="p-2">Fidelidad</th>
+                <th className="p-2">Fecha</th><th className="p-2">Sale ID</th><th className="p-2">Producto</th><th className="p-2">Item #</th><th className="p-2">Cantidad</th><th className="p-2">Precio</th><th className="p-2">Total</th><th className="p-2">Método</th><th className="p-2">Referencia</th><th className="p-2">Email</th><th className="p-2">Fidelidad</th>
               </tr>
             </thead>
             <tbody>
               {sales.map((s) => (
                 <tr key={`${s.sale_id}-${s.product_name}-${s.created_at}`} className="border-t border-uiBorder">
                   <td className="p-2">{new Date(s.created_at).toLocaleString()}</td>
-                  <td className="p-2 font-mono text-xs">{s.order_id ?? s.sale_id}</td>
+                  <td className="p-2 font-mono text-xs">{s.legacy_order_id ?? s.sale_id}</td>
                   <td className="p-2">{s.product_name}</td>
                   <td className="p-2">{s.item_number ?? "—"}</td>
                   <td className="p-2">{s.qty}</td>

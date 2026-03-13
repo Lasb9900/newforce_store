@@ -72,28 +72,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: closureError?.message || "No se pudo crear cierre" }, { status: 500 });
   }
 
-  let pendingRowsResult = await service
+  const pendingRowsResult = await service
     .from("pos_sales")
-    .select("id,order_id")
+    .select("id")
     .gte("created_at", fromIso)
     .lte("created_at", toIso)
     .is("cash_closure_id", null);
-
-  if (pendingRowsResult.error?.message?.includes("column pos_sales.order_id does not exist")) {
-    pendingRowsResult = await service
-      .from("pos_sales")
-      .select("id")
-      .gte("created_at", fromIso)
-      .lte("created_at", toIso)
-      .is("cash_closure_id", null);
-  }
 
   if (pendingRowsResult.error) {
     console.log("[POS_CLOSURE] error:", pendingRowsResult.error.message);
     return NextResponse.json({ error: `Cierre creado pero no se pudieron leer ventas pendientes: ${pendingRowsResult.error.message}` }, { status: 500 });
   }
 
-  const pendingRows = pendingRowsResult.data ?? [];
+  const pendingRows = (pendingRowsResult.data ?? []) as Array<{ id: string }>;
   const pendingSaleIds = pendingRows.map((row) => row.id);
   console.log("[POS_CLOSURE] pending sales count:", pendingSaleIds.length);
 
@@ -113,22 +104,8 @@ export async function POST(req: Request) {
     console.log("[POS_CLOSURE] marked sales count:", markedRows?.length ?? 0);
   }
 
-  const uniqueOrderIds = [
-    ...new Set(
-      pendingRows
-        .map((row) => ("order_id" in row ? (row as { order_id?: string | null }).order_id : null))
-        .filter((id): id is string => Boolean(id)),
-    ),
-  ];
-
-  if (uniqueOrderIds.length > 0) {
-    const linkRows = uniqueOrderIds.map((saleOrderId) => ({ closure_id: closure.id, sale_order_id: saleOrderId }));
-    const { error: linkErr } = await service.from("pos_cash_closure_sales").insert(linkRows);
-    if (linkErr) {
-      console.log("[POS_CLOSURE] error:", linkErr.message);
-      return NextResponse.json({ error: `Cierre creado pero no se pudieron asociar ventas: ${linkErr.message}` }, { status: 500 });
-    }
-  }
+  // Optional legacy linking by order_id is intentionally skipped because pos_sales
+  // may not expose order_id in all environments.
 
   return NextResponse.json({ ok: true, id: closure.id });
 }
