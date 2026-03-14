@@ -2,8 +2,6 @@ import { CatalogCategory, buildCatalogCategories, getCategoryBySlug, normalizeCa
 import { getServerSupabase, getServiceSupabase } from "@/lib/supabase";
 import { Product, ProductImage, ProductVariant } from "@/lib/types";
 
-type CatalogContext = "public" | "admin" | "seller";
-
 type ProductRow = Partial<Product> & {
   id?: string;
   name?: string | null;
@@ -23,14 +21,11 @@ type CategoryRow = {
   id: string;
   name: string;
   slug: string | null;
-  description?: string | null;
   image_url?: string | null;
   is_featured?: boolean | null;
   sort_order?: number | null;
   is_active?: boolean | null;
 };
-
-const PRODUCT_SELECT = "*, category:categories(*), images:product_images(*), variants:product_variants(*)";
 
 function parseBoolean(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
@@ -109,7 +104,7 @@ function normalizeCategoryRow(row: CategoryRow): CatalogCategory {
     name: row.name,
     slug: normalizeCategorySlug(row.slug ?? row.name),
     imageUrl: row.image_url ?? null,
-    description: row.description ?? null,
+    description: null,
     featured: Boolean(row.is_featured),
     productCount: 0,
   };
@@ -154,30 +149,94 @@ function sortProductsForStorefront(products: Product[]) {
   });
 }
 
-async function fetchProductsBase(context: CatalogContext): Promise<Product[]> {
+async function enrichProductsWithRelations(sb: Awaited<ReturnType<typeof getServerSupabase>>, products: Product[]) {
+  if (!products.length) return products;
+
+  const productIds = products.map((product) => product.id).filter(Boolean);
+  const productsById = new Map<string, Product>(
+    products.map((product) => [product.id, { ...product, images: [] as ProductImage[], variants: [] as ProductVariant[] }]),
+  );
+
+  const { data: images, error: imageError } = await sb
+    .from("product_images")
+    .select("id,product_id,url,sort_order")
+    .in("product_id", productIds)
+    .order("sort_order", { ascending: true });
+
+  if (imageError) {
+    console.error("[catalog.enrichProductsWithRelations] images error", imageError);
+  } else {
+    for (const image of (images ?? []) as ProductImage[]) {
+      const product = productsById.get(image.product_id);
+      if (!product) continue;
+      product.images = [...(product.images ?? []), image];
+    }
+  }
+
+  const { data: variants, error: variantError } = await sb
+    .from("product_variants")
+    .select("id,product_id,variant_name,attributes,price_cents,stock,sku,active")
+    .in("product_id", productIds);
+
+  if (variantError) {
+    console.error("[catalog.enrichProductsWithRelations] variants error", variantError);
+  } else {
+    for (const variant of (variants ?? []) as ProductVariant[]) {
+      const product = productsById.get(variant.product_id);
+      if (!product) continue;
+      product.variants = [...(product.variants ?? []), variant];
+    }
+  }
+
+  const categoryIds = [...new Set(products.map((product) => product.category_id).filter((value): value is string => Boolean(value)))];
+  if (categoryIds.length > 0) {
+    const { data: categories, error: categoryError } = await sb
+      .from("categories")
+      .select("id,name,slug")
+      .in("id", categoryIds);
+
+    if (categoryError) {
+      console.error("[catalog.enrichProductsWithRelations] categories error", categoryError);
+    } else {
+      const categoryMap = new Map((categories ?? []).map((category) => [category.id, category]));
+      for (const product of productsById.values()) {
+        if (!product.category_id) continue;
+        const category = categoryMap.get(product.category_id);
+        if (!category) continue;
+        product.category = category;
+      }
+    }
+  }
+
+  return [...productsById.values()];
+}
+
+export async function fetchProductsBase() {
   const sb = await getServerSupabase();
-  const { data, error } = await sb.from("products").select(PRODUCT_SELECT).order("created_at", { ascending: false, nullsFirst: false });
+  const { data, error } = await sb.from("products").select("*").order("created_at", { ascending: false });
 
   if (error) {
-    console.error(`[catalog.fetchProductsBase] ${context} error`, error);
+    console.error("[catalog.fetchProductsBase] public error", error);
     return [];
   }
 
   const rows = (data ?? []) as ProductRow[];
-  console.info(`[catalog.fetchProductsBase] ${context} returned rows`, rows.length);
+  console.info("[catalog.fetchProductsBase] rows", rows.length);
   return rows.map(normalizeProduct).filter((product) => Boolean(product.id));
 }
 
 export async function getProductsPublic() {
-  const allProducts = await fetchProductsBase("public");
-  const visibleProducts = allProducts.filter((product) => isProductVisibleForStorefront(product));
-  console.info("[catalog.getProductsPublic] visible rows", visibleProducts.length);
-  return sortProductsForStorefront(visibleProducts);
+  const sb = await getServerSupabase();
+  const baseProducts = await fetchProductsBase();
+  const visibleProducts = baseProducts.filter((product) => isProductVisibleForStorefront(product));
+  const enriched = await enrichProductsWithRelations(sb, visibleProducts);
+  console.info("[catalog.getProductsPublic] visible rows", enriched.length);
+  return sortProductsForStorefront(enriched);
 }
 
 export async function getProductsAdmin() {
   const admin = getServiceSupabase();
-  const { data, error } = await admin.from("products").select(PRODUCT_SELECT).order("created_at", { ascending: false, nullsFirst: false });
+  const { data, error } = await admin.from("products").select("*").order("created_at", { ascending: false });
 
   if (error) {
     console.error("[catalog.getProductsAdmin] error", error);
@@ -185,38 +244,56 @@ export async function getProductsAdmin() {
   }
 
   const rows = (data ?? []) as ProductRow[];
-  console.info("[catalog.getProductsAdmin] returned rows", rows.length);
-  return rows.map(normalizeProduct).filter((product) => Boolean(product.id));
+  const normalized = rows.map(normalizeProduct).filter((product) => Boolean(product.id));
+  const enriched = await enrichProductsWithRelations(admin as unknown as Awaited<ReturnType<typeof getServerSupabase>>, normalized);
+  console.info("[catalog.getProductsAdmin] rows", enriched.length);
+  return enriched;
 }
 
 export async function getProductsForSeller(sellerId: string) {
-  const products = await fetchProductsBase("seller");
-  const filtered = products.filter((product) => {
-    const rawSellerId = (product as Product & { seller_id?: string | null }).seller_id;
-    return rawSellerId ? rawSellerId === sellerId : true;
-  });
+  const sb = await getServerSupabase();
+  const { data, error } = await sb.from("products").select("*").eq("seller_id", sellerId).order("created_at", { ascending: false });
 
-  console.info("[catalog.getProductsForSeller] returned rows", filtered.length);
-  return filtered;
+  if (error) {
+    console.error("[catalog.getProductsForSeller] error", error);
+    return [];
+  }
+
+  const rows = (data ?? []) as ProductRow[];
+  const normalized = rows.map(normalizeProduct).filter((product) => Boolean(product.id));
+  const enriched = await enrichProductsWithRelations(sb, normalized);
+  console.info("[catalog.getProductsForSeller] rows", enriched.length);
+  return enriched;
 }
 
 export async function getCategories(products?: Product[]) {
   const sourceProducts = products ?? (await getProductsPublic());
   const sb = await getServerSupabase();
 
-  const { data: categoryRows, error } = await sb
-    .from("categories")
-    .select("id,name,slug,description,image_url,is_featured,sort_order,is_active")
-    .or("is_active.is.null,is_active.eq.true");
+  const categorySelect = "id,name,slug,image_url,is_featured,sort_order,is_active";
+  const { data: categoryRows, error } = await sb.from("categories").select(categorySelect);
 
   if (error) {
     console.error("[catalog.getCategories] error", error);
-    return buildCatalogCategories(sourceProducts);
+
+    const { data: minimalRows, error: minimalError } = await sb.from("categories").select("id,name,slug");
+    if (minimalError) {
+      console.error("[catalog.getCategories] minimal error", minimalError);
+      return buildCatalogCategories(sourceProducts);
+    }
+
+    const minimal = ((minimalRows ?? []) as Array<Pick<CategoryRow, "id" | "name" | "slug">>).map((row) =>
+      normalizeCategoryRow({ ...row, image_url: null, is_featured: false, sort_order: 0, is_active: true }),
+    );
+
+    const mergedMinimal = mergeCategoriesWithProducts(minimal, sourceProducts);
+    console.info("[catalog.getCategories] rows", mergedMinimal.length);
+    return mergedMinimal;
   }
 
   const normalized = ((categoryRows ?? []) as CategoryRow[]).map(normalizeCategoryRow);
   const merged = mergeCategoriesWithProducts(normalized, sourceProducts);
-  console.info("[catalog.getCategories] merged categories", merged.length);
+  console.info("[catalog.getCategories] rows", merged.length);
   return merged;
 }
 
@@ -224,7 +301,7 @@ export async function getVisibleCategories(products?: Product[]) {
   const sourceProducts = products ?? (await getProductsPublic());
   const categories = await getCategories(sourceProducts);
   const visible = categories.filter((category) => category.productCount > 0);
-  console.info("[catalog.getVisibleCategories] visible categories", visible.length);
+  console.info("[catalog.getVisibleCategories] rows", visible.length);
   return visible;
 }
 
@@ -234,14 +311,11 @@ export async function getFeaturedCategories(products?: Product[], limit = 4) {
   const sortedFeatured = [...featured].sort((a, b) => b.productCount - a.productCount);
 
   if (sortedFeatured.length >= limit) {
-    console.info("[catalog.getFeaturedCategories] using featured categories", sortedFeatured.length);
     return sortedFeatured.slice(0, limit);
   }
 
   const supplemental = visible.filter((category) => !sortedFeatured.some((item) => item.slug === category.slug));
-  const selected = [...sortedFeatured, ...supplemental].slice(0, limit);
-  console.info("[catalog.getFeaturedCategories] selected categories", selected.length);
-  return selected;
+  return [...sortedFeatured, ...supplemental].slice(0, limit);
 }
 
 export async function getProductsByCategorySlug(categorySlug: string) {
@@ -261,14 +335,16 @@ export async function getProductsByCategorySlug(categorySlug: string) {
 
 export async function getProductById(id: string) {
   const sb = await getServerSupabase();
-  const { data, error } = await sb.from("products").select(PRODUCT_SELECT).eq("id", id).single();
+  const { data, error } = await sb.from("products").select("*").eq("id", id).single();
 
   if (error) {
     console.error("[catalog.getProductById] error", error);
     return null;
   }
 
-  return normalizeProduct((data ?? {}) as ProductRow);
+  const product = normalizeProduct((data ?? {}) as ProductRow);
+  const [enriched] = await enrichProductsWithRelations(sb, [product]);
+  return enriched;
 }
 
 export async function getTopSelling(days = 30) {

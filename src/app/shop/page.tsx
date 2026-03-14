@@ -6,9 +6,8 @@ import { PromoBanner } from "@/components/PromoBanner";
 import { ShopFilters } from "@/components/ShopFilters";
 import { SortSelect } from "@/components/SortSelect";
 import { getProductsPublic, getVisibleCategories } from "@/lib/catalog";
-import { getCategoryBySlug } from "@/lib/categories";
+import { CatalogCategory, getCategoryBySlug } from "@/lib/categories";
 import { applyShopFilters, parseShopFilters } from "@/lib/shop";
-import { CatalogCategory } from "@/lib/categories";
 import { Product } from "@/lib/types";
 
 export const metadata: Metadata = {
