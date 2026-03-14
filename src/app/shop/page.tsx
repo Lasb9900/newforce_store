@@ -8,6 +8,8 @@ import { SortSelect } from "@/components/SortSelect";
 import { getProductsPublic, getVisibleCategories } from "@/lib/catalog";
 import { getCategoryBySlug } from "@/lib/categories";
 import { applyShopFilters, parseShopFilters } from "@/lib/shop";
+import { CatalogCategory } from "@/lib/categories";
+import { Product } from "@/lib/types";
 
 export const metadata: Metadata = {
   title: "Shop | Newforce Store",
@@ -41,8 +43,19 @@ export default async function ShopPage({
   const params = await searchParams;
   const requestedFilters = parseShopFilters(params);
 
-  const products = await getProductsPublic();
-  const categories = await getVisibleCategories(products);
+  let products: Product[] = [];
+  let categories: CatalogCategory[] = [];
+  let hasLoadError = false;
+
+  try {
+    products = await getProductsPublic();
+    categories = await getVisibleCategories(products);
+    console.info("[shop.page] products loaded", products.length);
+    console.info("[shop.page] categories loaded", categories.length);
+  } catch (error) {
+    hasLoadError = true;
+    console.error("[shop.page] failed to load catalog", error);
+  }
 
   const validCategory = getCategoryBySlug(categories, requestedFilters.category);
   const filters = {
@@ -104,6 +117,12 @@ export default async function ShopPage({
           </div>
         ) : null}
       </header>
+
+      {hasLoadError ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-900">
+          We couldn&apos;t load the catalog right now. Please refresh the page in a moment.
+        </div>
+      ) : null}
 
       <div className="md:hidden">
         <FilterDrawer>

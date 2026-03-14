@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ProductCard } from "@/components/ProductCard";
-import { getFeaturedCategories, getProductsPublic } from "@/lib/catalog";
+import { getFeaturedCategories, getProductsPublic, getVisibleCategories } from "@/lib/catalog";
+import { Product } from "@/lib/types";
 
 const benefits = [
   { title: "Secure checkout", description: "Encrypted payment flow with order validation." },
@@ -9,12 +10,36 @@ const benefits = [
   { title: "Expert support", description: "Retail support team available before and after purchase." },
 ];
 
+function safeDate(value?: string | null) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function buildHomeCollections(products: Product[]) {
+  const sortedByRecency = [...products].sort((a, b) => safeDate(b.created_at) - safeDate(a.created_at) || a.name.localeCompare(b.name));
+  const bestSellers = products.filter((product) => product.featured).slice(0, 8);
+  const bestSellerFallback = bestSellers.length ? bestSellers : sortedByRecency.slice(0, 8);
+  const newArrivals = sortedByRecency.slice(0, 4);
+  const deals = products.filter((product) => (product.price_cents ?? 0) > (product.base_price_cents ?? 0)).slice(0, 4);
+  const dealsFallback = deals.length ? deals : [...bestSellerFallback, ...newArrivals].slice(0, 4);
+
+  return {
+    bestSellers: bestSellerFallback,
+    newArrivals,
+    topDeals: dealsFallback,
+  };
+}
+
 export default async function Home() {
   const products = await getProductsPublic();
-  const featured = products.filter((product) => product.featured).slice(0, 8);
-  const newArrivals = [...products].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 4);
-  const deals = products.filter((product) => (product.price_cents ?? 0) > (product.base_price_cents ?? 0)).slice(0, 4);
+  const { bestSellers, newArrivals, topDeals } = buildHomeCollections(products);
+
   const categoryHighlights = await getFeaturedCategories(products, 4);
+  const visibleCategories = categoryHighlights.length ? categoryHighlights : await getVisibleCategories(products);
+
+  console.info("[home.page] products loaded", products.length);
+  console.info("[home.page] category highlights loaded", visibleCategories.length);
 
   return (
     <div className="space-y-12">
@@ -33,9 +58,9 @@ export default async function Home() {
           <h2 className="text-2xl font-bold text-brand-ink">Featured categories</h2>
           <Link href="/shop" className="text-sm font-medium text-brand-primary hover:underline">Browse catalog</Link>
         </div>
-        {categoryHighlights.length ? (
+        {visibleCategories.length ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {categoryHighlights.map((category) => (
+            {visibleCategories.map((category) => (
               <Link key={category.slug} href={`/shop?category=${category.slug}`} className="rounded-xl border border-uiBorder bg-slate-50 px-4 py-6 text-center font-semibold text-slate-700 transition hover:border-brand-primary hover:text-brand-primary">
                 <p>{category.name}</p>
                 <p className="mt-1 text-xs font-medium text-mutedText">{category.productCount} products</p>
@@ -43,7 +68,9 @@ export default async function Home() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-mutedText">Categories will appear automatically as active products are added.</p>
+          <div className="rounded-xl border border-dashed border-uiBorder bg-slate-50 px-4 py-6 text-sm text-mutedText">
+            Aún no hay categorías disponibles. Puedes explorar todos los productos en la tienda.
+          </div>
         )}
       </section>
 
@@ -52,11 +79,15 @@ export default async function Home() {
           <h2 className="text-2xl font-bold text-brand-ink">Best sellers</h2>
           <Link href="/shop?sort=best_selling" className="text-sm font-medium text-brand-primary hover:underline">View all</Link>
         </div>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {featured.map((product) => (
-            <ProductCard key={product.id} product={product} />
-          ))}
-        </div>
+        {bestSellers.length ? (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {bestSellers.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-xl border border-dashed border-uiBorder bg-slate-50 px-4 py-6 text-sm text-mutedText">No products are available yet. Please check back soon.</p>
+        )}
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
@@ -65,11 +96,15 @@ export default async function Home() {
             <h2 className="text-xl font-bold">New arrivals</h2>
             <Link href="/shop?sort=newest" className="text-sm font-medium text-brand-primary hover:underline">Explore</Link>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {newArrivals.map((product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </div>
+          {newArrivals.length ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {newArrivals.map((product) => (
+                <ProductCard key={product.id} product={product} />
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-xl border border-dashed border-uiBorder bg-slate-50 px-4 py-6 text-sm text-mutedText">New arrivals will appear here as products are published.</p>
+          )}
         </div>
 
         <div>
@@ -77,11 +112,15 @@ export default async function Home() {
             <h2 className="text-xl font-bold">Top deals</h2>
             <Link href="/shop?discounted=true" className="text-sm font-medium text-brand-primary hover:underline">Save more</Link>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {(deals.length ? deals : featured.slice(0, 4)).map((product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </div>
+          {topDeals.length ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {topDeals.map((product) => (
+                <ProductCard key={product.id} product={product} />
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-xl border border-dashed border-uiBorder bg-slate-50 px-4 py-6 text-sm text-mutedText">Deals will appear when promotions become available.</p>
+          )}
         </div>
       </section>
 
