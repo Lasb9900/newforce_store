@@ -23,11 +23,22 @@ export type ShopFilters = {
 };
 
 export function productPrice(product: Product) {
-  return product.variants?.length ? Math.min(...product.variants.map((v) => v.price_cents)) : (product.base_price_cents ?? 0);
+  const variantPrices = (product.variants ?? []).map((v) => v.price_cents).filter((value) => typeof value === "number" && value > 0);
+  if (variantPrices.length > 0) {
+    return Math.min(...variantPrices);
+  }
+
+  return product.base_price_cents && product.base_price_cents > 0 ? product.base_price_cents : 0;
 }
 
 export function productCategory(product: Product) {
   return getProductCategoryMeta(product).slug;
+}
+
+function safeCreatedAt(dateString: string | null | undefined) {
+  if (!dateString) return 0;
+  const parsed = Date.parse(dateString);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export function parseShopFilters(params: Record<string, string | string[] | undefined>): ShopFilters {
@@ -59,7 +70,7 @@ export function applyShopFilters(products: Product[], filters: ShopFilters) {
     const category = productCategory(product);
     const stock = product.base_stock ?? product.qty ?? 0;
     const comparePrice = product.price_cents ?? 0;
-    const searchable = [product.name, product.sku ?? "", product.department ?? "", product.seller_category ?? "", product.item_number ?? ""]
+    const searchable = [product.name ?? "", product.sku ?? "", product.department ?? "", product.seller_category ?? "", product.item_number ?? ""]
       .join(" ")
       .toLowerCase();
 
@@ -89,7 +100,7 @@ export function applyShopFilters(products: Product[], filters: ShopFilters) {
       case "discount_desc":
         return bDiscount - aDiscount;
       case "newest":
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        return safeCreatedAt(b.created_at) - safeCreatedAt(a.created_at);
       case "best_selling":
         return Number(b.featured) - Number(a.featured);
       case "rating_desc":
