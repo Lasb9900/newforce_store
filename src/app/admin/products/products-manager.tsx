@@ -73,10 +73,14 @@ const EMPTY_FORM: ProductForm = {
   tags: [],
 };
 
+const PAGE_SIZE = 10;
+
 export default function ProductsManager({ initialProducts }: { initialProducts: ProductRow[] }) {
-  const [products, setProducts] = useState<ProductRow[]>(initialProducts);
+  const [products, setProducts] = useState<ProductRow[]>(initialProducts ?? []);
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive" | "featured">("all");
+  const [currentPage, setCurrentPage] = useState(1);
+
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -88,36 +92,48 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
-    return products.filter((product) => {
-      const matchQuery =
-        !query ||
-        product.name.toLowerCase().includes(query.toLowerCase()) ||
-        (product.sku ?? "").toLowerCase().includes(query.toLowerCase()) ||
-        (product.item_description ?? "").toLowerCase().includes(query.toLowerCase()) ||
-        (product.category ?? "").toLowerCase().includes(query.toLowerCase());
+  return products.filter((product) => {
+    const matchQuery =
+      !query ||
+      product.name.toLowerCase().includes(query.toLowerCase()) ||
+      (product.sku ?? "").toLowerCase().includes(query.toLowerCase()) ||
+      (product.item_description ?? "").toLowerCase().includes(query.toLowerCase()) ||
+      (product.category ?? "").toLowerCase().includes(query.toLowerCase());
 
-      const matchActive =
-        activeFilter === "all" ||
-        (activeFilter === "active"
-          ? product.active
-          : activeFilter === "inactive"
-            ? !product.active
-            : product.featured);
+    const matchActive =
+      activeFilter === "all" ||
+      (activeFilter === "active"
+        ? product.active
+        : activeFilter === "inactive"
+          ? !product.active
+          : product.featured);
 
-      return matchQuery && matchActive;
-    });
-  }, [products, query, activeFilter]);
+    return matchQuery && matchActive;
+  });
+}, [products, query, activeFilter]);
 
+const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+const safeCurrentPage = Math.min(currentPage, totalPages);
+
+const paginatedProducts = useMemo(() => {
+  const start = (safeCurrentPage - 1) * PAGE_SIZE;
+  return filtered.slice(start, start + PAGE_SIZE);
+}, [filtered, safeCurrentPage]);
+
+const rangeStart = filtered.length === 0 ? 0 : (safeCurrentPage - 1) * PAGE_SIZE + 1;
+const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZE, filtered.length);
   async function refreshProducts() {
     const res = await fetch("/api/admin/products", { cache: "no-store" });
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || "No se pudo refrescar productos");
 
-    const normalized = (json.data ?? []).map((row: ProductRow & { images?: Array<{ url: string; sort_order: number }> }) => {
-      const images = Array.isArray(row.images) ? [...row.images] : [];
-      const primary = images.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0];
-      return { ...row, image_url: primary?.url ?? row.image_url ?? null };
-    });
+    const normalized = (json.data ?? []).map(
+      (row: ProductRow & { images?: Array<{ url: string; sort_order: number }> }) => {
+        const images = Array.isArray(row.images) ? [...row.images] : [];
+        const primary = images.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0];
+        return { ...row, image_url: primary?.url ?? row.image_url ?? null };
+      },
+    );
 
     setProducts(normalized);
   }
@@ -155,6 +171,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     setError(null);
     setImageFile(null);
     setImagePreview(product.image_url ?? null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function uploadImage(productId: string) {
@@ -323,7 +340,9 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Productos</h1>
         <div className="flex items-center gap-2">
-          <button className="btn-primary" onClick={startNewProduct} type="button">Nuevo producto</button>
+          <button className="btn-primary" onClick={startNewProduct} type="button">
+            Nuevo producto
+          </button>
           <label className="cursor-pointer rounded-md border border-uiBorder bg-surface px-3 py-2 text-sm hover:bg-surfaceMuted">
             Importar CSV
             <input
@@ -337,24 +356,80 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       </div>
 
       <form onSubmit={parseCsv} className="flex flex-wrap items-center gap-2 rounded-xl border border-uiBorder bg-surface p-3">
-        <p className="text-sm text-mutedText">Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition</p>
-        <button type="submit" className="rounded-md border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted">Leer CSV</button>
+        <p className="text-sm text-mutedText">
+          Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition
+        </p>
+        <button type="submit" className="rounded-md border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted">
+          Leer CSV
+        </button>
         {importPreview.length > 0 ? (
-          <button type="button" onClick={confirmImport} className="btn-primary">Guardar importación</button>
+          <button type="button" onClick={confirmImport} className="btn-primary">
+            Guardar importación
+          </button>
         ) : null}
         {csvFile ? <p className="text-xs text-mutedText">Archivo: {csvFile.name}</p> : null}
       </form>
 
       <form onSubmit={saveProduct} className="grid gap-3 rounded-xl border border-uiBorder bg-surface p-4 shadow-sm md:grid-cols-2">
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Item # / SKU" value={form.sku} onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Item Description / Nombre" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Department" value={form.department} onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Seller Category" value={form.seller_category} onChange={(e) => setForm((f) => ({ ...f, seller_category: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Category" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Condition" value={form.condition} onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Descripción extendida" value={form.item_description} onChange={(e) => setForm((f) => ({ ...f, item_description: e.target.value }))} />
-        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Price (cents)" value={form.price_cents ?? ""} onChange={(e) => setForm((f) => ({ ...f, price_cents: e.target.value === "" ? null : Number(e.target.value) }))} />
-        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Qty" value={form.qty} onChange={(e) => setForm((f) => ({ ...f, qty: Number(e.target.value) }))} />
+        <input
+          className="rounded-md border border-uiBorder p-2.5"
+          placeholder="Item # / SKU"
+          value={form.sku}
+          onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))}
+        />
+        <input
+          className="rounded-md border border-uiBorder p-2.5"
+          placeholder="Item Description / Nombre"
+          value={form.name}
+          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          required
+        />
+        <input
+          className="rounded-md border border-uiBorder p-2.5"
+          placeholder="Department"
+          value={form.department}
+          onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))}
+        />
+        <input
+          className="rounded-md border border-uiBorder p-2.5"
+          placeholder="Seller Category"
+          value={form.seller_category}
+          onChange={(e) => setForm((f) => ({ ...f, seller_category: e.target.value }))}
+        />
+        <input
+          className="rounded-md border border-uiBorder p-2.5"
+          placeholder="Category"
+          value={form.category}
+          onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+        />
+        <input
+          className="rounded-md border border-uiBorder p-2.5"
+          placeholder="Condition"
+          value={form.condition}
+          onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value }))}
+        />
+        <input
+          className="rounded-md border border-uiBorder p-2.5"
+          placeholder="Descripción extendida"
+          value={form.item_description}
+          onChange={(e) => setForm((f) => ({ ...f, item_description: e.target.value }))}
+        />
+        <input
+          type="number"
+          className="rounded-md border border-uiBorder p-2.5"
+          placeholder="Price (cents)"
+          value={form.price_cents ?? ""}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, price_cents: e.target.value === "" ? null : Number(e.target.value) }))
+          }
+        />
+        <input
+          type="number"
+          className="rounded-md border border-uiBorder p-2.5"
+          placeholder="Qty"
+          value={form.qty}
+          onChange={(e) => setForm((f) => ({ ...f, qty: Number(e.target.value) }))}
+        />
 
         <div className="md:col-span-2 rounded-md border border-uiBorder p-3">
           <p className="mb-2 text-sm font-semibold">Foto del producto</p>
@@ -375,15 +450,29 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
               />
             </label>
             {imageFile ? <span className="text-xs text-mutedText">{imageFile.name}</span> : null}
-            {imagePreview ? <img src={imagePreview} alt="preview" className="h-14 w-14 rounded object-cover border border-uiBorder" /> : <span className="text-xs text-mutedText">Sin imagen</span>}
+            {imagePreview ? (
+              <img src={imagePreview} alt="preview" className="h-14 w-14 rounded object-cover border border-uiBorder" />
+            ) : (
+              <span className="text-xs text-mutedText">Sin imagen</span>
+            )}
           </div>
         </div>
 
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} /> Activo</label>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.featured} onChange={(e) => setForm((f) => ({ ...f, featured: e.target.checked }))} /> Featured</label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} /> Activo
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={form.featured} onChange={(e) => setForm((f) => ({ ...f, featured: e.target.checked }))} /> Featured
+        </label>
         <div className="md:col-span-2 flex items-center gap-2">
-          <button className="btn-primary" type="submit">{editingId ? "Guardar cambios" : "Crear producto"}</button>
-          {editingId ? <button type="button" className="rounded-md border border-uiBorder px-3 py-2 text-sm" onClick={startNewProduct}>Cancelar edición</button> : null}
+          <button className="btn-primary" type="submit">
+            {editingId ? "Guardar cambios" : "Crear producto"}
+          </button>
+          {editingId ? (
+            <button type="button" className="rounded-md border border-uiBorder px-3 py-2 text-sm" onClick={startNewProduct}>
+              Cancelar edición
+            </button>
+          ) : null}
         </div>
       </form>
 
@@ -425,55 +514,121 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input className="rounded-md border border-uiBorder p-2 text-sm" placeholder="Buscar por item#, nombre, descripción o category" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <select className="rounded-md border border-uiBorder p-2 text-sm" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value as "all" | "active" | "inactive" | "featured") }>
-          <option value="all">Todos</option>
-          <option value="active">Activos</option>
-          <option value="inactive">Inactivos</option>
-          <option value="featured">Featured</option>
-        </select>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="rounded-md border border-uiBorder p-2 text-sm"
+            placeholder="Buscar por item#, nombre, descripción o category"
+            value={query}
+            onChange={(e) => {
+            setQuery(e.target.value);
+            setCurrentPage(1);
+            }}
+          />
+          <select
+            className="rounded-md border border-uiBorder p-2 text-sm"
+            value={activeFilter}
+            onChange={(e) => {
+            setActiveFilter(e.target.value as "all" | "active" | "inactive" | "featured");
+            setCurrentPage(1);
+           }}
+          >
+            <option value="all">Todos</option>
+            <option value="active">Activos</option>
+            <option value="inactive">Inactivos</option>
+            <option value="featured">Featured</option>
+          </select>
+        </div>
+
+        <div className="text-sm text-mutedText">
+          Mostrando {rangeStart}-{rangeEnd} de {filtered.length}
+        </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-uiBorder bg-surface">
-        <table className="w-full text-sm">
-          <thead className="bg-surfaceMuted text-left text-mutedText">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full min-w-[1280px] text-sm">
+          <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-3 py-2">Foto</th>
-              <th className="px-3 py-2">Item #</th>
-              <th className="px-3 py-2">Department</th>
-              <th className="px-3 py-2">Item Description</th>
-              <th className="px-3 py-2">Qty</th>
-              <th className="px-3 py-2">Seller Category</th>
-              <th className="px-3 py-2">Category</th>
-              <th className="px-3 py-2">Condition</th>
-              <th className="px-3 py-2">Activo</th>
-              <th className="px-3 py-2">Featured</th>
-              <th className="px-3 py-2">Acciones</th>
+              <th className="px-4 py-3">Foto</th>
+              <th className="px-4 py-3">Item #</th>
+              <th className="px-4 py-3">Department</th>
+              <th className="px-4 py-3">Item Description</th>
+              <th className="px-4 py-3">Qty</th>
+              <th className="px-4 py-3">Seller Category</th>
+              <th className="px-4 py-3">Category</th>
+              <th className="px-4 py-3">Condition</th>
+              <th className="px-4 py-3">Activo</th>
+              <th className="px-4 py-3">Featured</th>
+              <th className="px-4 py-3">Acciones</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {paginatedProducts.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-mutedText" colSpan={11}>No hay productos para mostrar</td>
+                <td className="px-3 py-8 text-center text-mutedText" colSpan={11}>
+                  No hay productos para mostrar
+                </td>
               </tr>
             ) : (
-              filtered.map((p) => (
-                <tr key={p.id} className="border-t border-uiBorder">
-                  <td className="px-3 py-2">{p.image_url ? <img src={p.image_url} alt={p.name} className="h-10 w-10 rounded object-cover border border-uiBorder" /> : <span className="text-xs text-mutedText">Sin foto</span>}</td>
+              paginatedProducts.map((p) => (
+                <tr key={p.id} className="border-t border-slate-200 align-middle transition hover:bg-slate-50/70">
+                  <td className="px-4 py-3">
+                    {p.image_url ? (
+                      <img src={p.image_url} alt={p.name} className="h-12 w-12 rounded-xl border border-slate-200 object-cover shadow-sm" />
+                    ) : (
+                      <span className="text-xs text-mutedText">Sin foto</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">{p.item_number ?? p.sku ?? "—"}</td>
-                  <td className="px-3 py-2">{p.department ?? "—"}</td>
-                  <td className="px-3 py-2 font-medium">{p.item_description || p.name}</td>
+                  <td className="px-4 py-3 text-slate-700">{p.department ?? "—"}</td>
+                  <td className="px-4 py-3 text-slate-700">
+                    <div className="max-w-[220px]">
+                      <p className="font-semibold text-slate-900">{p.item_description || p.name}</p>
+                      <p className="mt-1 text-xs text-slate-500">{p.item_number ?? p.sku ?? "Sin SKU"}</p>
+                    </div>
+                  </td>
                   <td className="px-3 py-2">{p.qty ?? p.base_stock}</td>
-                  <td className="px-3 py-2">{p.seller_category ?? "—"}</td>
-                  <td className="px-3 py-2">{p.category ?? p.category_ref?.name ?? "—"}</td>
-                  <td className="px-3 py-2">{p.condition ?? "—"}</td>
-                  <td className="px-3 py-2">{p.active ? "Sí" : "No"}</td>
-                  <td className="px-3 py-2">{p.featured ? "Sí" : "No"}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <button className="rounded border border-uiBorder px-2 py-1 text-xs" type="button" onClick={() => startEdit(p)}>Editar</button>
-                      <button className="rounded border border-red-300 px-2 py-1 text-xs text-red-700" type="button" onClick={() => removeProduct(p.id)}>Eliminar</button>
+                  <td className="px-4 py-3 text-slate-700">{p.seller_category ?? "—"}</td>
+                  <td className="px-4 py-3 text-slate-700">{p.category ?? p.category_ref?.name ?? "—"}</td>
+                  <td className="px-4 py-3 text-slate-700">{p.condition ?? "—"}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                      p.active
+                      ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                      : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                      }`}
+                      >
+                      {p.active ? "Activo" : "Inactivo"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                      p.featured
+                      ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                      : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                    }`}
+                    >
+                    {p.featured ? "Featured" : "Normal"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex min-w-[170px] items-center gap-2">
+                      <button
+                        className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                        type="button"
+                        onClick={() => startEdit(p)}
+                      >
+                      Editar
+                      </button>
+                      <button
+                      className="inline-flex items-center rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-700 shadow-sm transition hover:bg-red-50"
+                      type="button"
+                      onClick={() => removeProduct(p.id)}
+                      >
+                      Eliminar
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -482,6 +637,34 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
           </tbody>
         </table>
       </div>
+
+      {filtered.length > PAGE_SIZE ? (
+  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <p className="text-sm text-mutedText">
+      Página {safeCurrentPage} de {totalPages}
+    </p>
+
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        className="rounded-md border border-uiBorder px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+        disabled={safeCurrentPage === 1}
+      >
+        Anterior
+      </button>
+
+      <button
+        type="button"
+        className="rounded-md border border-uiBorder px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+        disabled={safeCurrentPage === totalPages}
+      >
+        Siguiente
+      </button>
+    </div>
+  </div>
+) : null}
     </div>
   );
 }
