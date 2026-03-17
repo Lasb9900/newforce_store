@@ -319,47 +319,88 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Productos</h1>
-        <div className="flex items-center gap-2">
-          <button className="btn-primary" onClick={startNewProduct} type="button">Nuevo producto</button>
-          <label className="cursor-pointer rounded-md border border-uiBorder bg-surface px-3 py-2 text-sm hover:bg-surfaceMuted">
-            Importar CSV
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
+    <div className="space-y-6">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Catálogo</p>
+            <h1 className="mt-1 text-2xl font-bold text-slate-900 md:text-3xl">Gestión de productos</h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-600">Administra tu inventario, carga catálogos por CSV y edita productos individuales sin afectar tus flujos actuales.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="btn-primary" onClick={startNewProduct} type="button">Nuevo producto</button>
+            <label className="cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+              Importar CSV
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+          </div>
         </div>
       </div>
 
-      <form onSubmit={parseCsv} className="flex flex-wrap items-center gap-2 rounded-xl border border-uiBorder bg-surface p-3">
-        <p className="text-sm text-mutedText">Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition</p>
-        <button type="submit" className="rounded-md border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted">Leer CSV</button>
+      <form onSubmit={parseCsv} className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <p className="text-sm text-slate-600">Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition</p>
+        <button type="submit" className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Leer CSV</button>
         {importPreview.length > 0 ? (
           <button type="button" onClick={confirmImport} className="btn-primary">Guardar importación</button>
         ) : null}
-        {csvFile ? <p className="text-xs text-mutedText">Archivo: {csvFile.name}</p> : null}
+        {csvFile ? <p className="text-xs text-slate-500">Archivo: {csvFile.name}</p> : null}
       </form>
 
-      <form onSubmit={saveProduct} className="grid gap-3 rounded-xl border border-uiBorder bg-surface p-4 shadow-sm md:grid-cols-2">
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Item # / SKU" value={form.sku} onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Item Description / Nombre" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Department" value={form.department} onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Seller Category" value={form.seller_category} onChange={(e) => setForm((f) => ({ ...f, seller_category: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Category" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Condition" value={form.condition} onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value }))} />
-        <input className="rounded-md border border-uiBorder p-2.5" placeholder="Descripción extendida" value={form.item_description} onChange={(e) => setForm((f) => ({ ...f, item_description: e.target.value }))} />
-        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Price (cents)" value={form.price_cents ?? ""} onChange={(e) => setForm((f) => ({ ...f, price_cents: e.target.value === "" ? null : Number(e.target.value) }))} />
-        <input type="number" className="rounded-md border border-uiBorder p-2.5" placeholder="Qty" value={form.qty} onChange={(e) => setForm((f) => ({ ...f, qty: Number(e.target.value) }))} />
+      <form onSubmit={saveProduct} className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Item # / SKU</label>
+            <input className="w-full rounded-lg border border-slate-200 p-2.5" placeholder="Item # / SKU" value={form.sku} onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Item Description / Nombre</label>
+            <input className="w-full rounded-lg border border-slate-200 p-2.5" placeholder="Item Description / Nombre" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required />
+          </div>
+        </div>
 
-        <div className="md:col-span-2 rounded-md border border-uiBorder p-3">
-          <p className="mb-2 text-sm font-semibold">Foto del producto</p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Department</label>
+            <input className="w-full rounded-lg border border-slate-200 p-2.5" placeholder="Department" value={form.department} onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Seller Category</label>
+            <input className="w-full rounded-lg border border-slate-200 p-2.5" placeholder="Seller Category" value={form.seller_category} onChange={(e) => setForm((f) => ({ ...f, seller_category: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Category</label>
+            <input className="w-full rounded-lg border border-slate-200 p-2.5" placeholder="Category" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Condition</label>
+            <input className="w-full rounded-lg border border-slate-200 p-2.5" placeholder="Condition" value={form.condition} onChange={(e) => setForm((f) => ({ ...f, condition: e.target.value }))} />
+          </div>
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Descripción extendida</label>
+            <input className="w-full rounded-lg border border-slate-200 p-2.5" placeholder="Descripción extendida" value={form.item_description} onChange={(e) => setForm((f) => ({ ...f, item_description: e.target.value }))} />
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Price (cents)</label>
+            <input type="number" className="w-full rounded-lg border border-slate-200 p-2.5" placeholder="Price (cents)" value={form.price_cents ?? ""} onChange={(e) => setForm((f) => ({ ...f, price_cents: e.target.value === "" ? null : Number(e.target.value) }))} />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Qty</label>
+            <input type="number" className="w-full rounded-lg border border-slate-200 p-2.5" placeholder="Qty" value={form.qty} onChange={(e) => setForm((f) => ({ ...f, qty: Number(e.target.value) }))} />
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-4">
+          <p className="mb-2 text-sm font-semibold text-slate-700">Foto del producto</p>
           <div className="flex flex-wrap items-center gap-3">
-            <label className="cursor-pointer rounded border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted">
+            <label className="cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
               Subir imagen
               <input
                 type="file"
@@ -374,49 +415,52 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
                 }}
               />
             </label>
-            {imageFile ? <span className="text-xs text-mutedText">{imageFile.name}</span> : null}
-            {imagePreview ? <img src={imagePreview} alt="preview" className="h-14 w-14 rounded object-cover border border-uiBorder" /> : <span className="text-xs text-mutedText">Sin imagen</span>}
+            {imageFile ? <span className="text-xs text-slate-500">{imageFile.name}</span> : null}
+            {imagePreview ? <img src={imagePreview} alt="preview" className="h-14 w-14 rounded-lg border border-slate-200 object-cover" /> : <span className="text-xs text-slate-500">Sin imagen</span>}
           </div>
         </div>
 
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} /> Activo</label>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.featured} onChange={(e) => setForm((f) => ({ ...f, featured: e.target.checked }))} /> Featured</label>
-        <div className="md:col-span-2 flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-5">
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} /> Activo</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.featured} onChange={(e) => setForm((f) => ({ ...f, featured: e.target.checked }))} /> Featured</label>
+        </div>
+
+        <div className="flex items-center gap-2">
           <button className="btn-primary" type="submit">{editingId ? "Guardar cambios" : "Crear producto"}</button>
-          {editingId ? <button type="button" className="rounded-md border border-uiBorder px-3 py-2 text-sm" onClick={startNewProduct}>Cancelar edición</button> : null}
+          {editingId ? <button type="button" className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700" onClick={startNewProduct}>Cancelar edición</button> : null}
         </div>
       </form>
 
-      {message ? <p className="text-sm text-green-700">{message}</p> : null}
-      {importResult ? <p className="text-sm text-brand-secondary">{importResult}</p> : null}
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {message ? <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p> : null}
+      {importResult ? <p className="rounded-lg border border-brand-secondary/20 bg-brand-secondary/5 px-3 py-2 text-sm text-brand-secondary">{importResult}</p> : null}
+      {error ? <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p> : null}
 
       {importPreview.length > 0 ? (
-        <div className="rounded-xl border border-uiBorder bg-surface p-3">
-          <p className="mb-2 text-sm font-semibold">Vista previa CSV (primeras 20 filas)</p>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="mb-2 text-sm font-semibold text-slate-700">Vista previa CSV (primeras 20 filas)</p>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead className="bg-surfaceMuted text-left">
+              <thead className="bg-slate-50 text-left text-slate-600">
                 <tr>
-                  <th className="px-2 py-1">Item #</th>
-                  <th className="px-2 py-1">Department</th>
-                  <th className="px-2 py-1">Item Description</th>
-                  <th className="px-2 py-1">Qty</th>
-                  <th className="px-2 py-1">Seller Category</th>
-                  <th className="px-2 py-1">Category</th>
-                  <th className="px-2 py-1">Condition</th>
+                  <th className="px-2 py-2">Item #</th>
+                  <th className="px-2 py-2">Department</th>
+                  <th className="px-2 py-2">Item Description</th>
+                  <th className="px-2 py-2">Qty</th>
+                  <th className="px-2 py-2">Seller Category</th>
+                  <th className="px-2 py-2">Category</th>
+                  <th className="px-2 py-2">Condition</th>
                 </tr>
               </thead>
               <tbody>
                 {importPreview.map((row, idx) => (
-                  <tr key={idx} className="border-t border-uiBorder">
-                    <td className="px-2 py-1">{String(row.itemNumber ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.department ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.itemDescription ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.qty ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.sellerCategory ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.category ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.condition ?? "")}</td>
+                  <tr key={idx} className="border-t border-slate-100">
+                    <td className="px-2 py-2">{String(row.itemNumber ?? "")}</td>
+                    <td className="px-2 py-2">{String(row.department ?? "")}</td>
+                    <td className="px-2 py-2">{String(row.itemDescription ?? "")}</td>
+                    <td className="px-2 py-2">{String(row.qty ?? "")}</td>
+                    <td className="px-2 py-2">{String(row.sellerCategory ?? "")}</td>
+                    <td className="px-2 py-2">{String(row.category ?? "")}</td>
+                    <td className="px-2 py-2">{String(row.condition ?? "")}</td>
                   </tr>
                 ))}
               </tbody>
@@ -425,62 +469,64 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input className="rounded-md border border-uiBorder p-2 text-sm" placeholder="Buscar por item#, nombre, descripción o category" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <select className="rounded-md border border-uiBorder p-2 text-sm" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value as "all" | "active" | "inactive" | "featured") }>
-          <option value="all">Todos</option>
-          <option value="active">Activos</option>
-          <option value="inactive">Inactivos</option>
-          <option value="featured">Featured</option>
-        </select>
-      </div>
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <input className="rounded-lg border border-slate-200 p-2 text-sm" placeholder="Buscar por item#, nombre, descripción o category" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <select className="rounded-lg border border-slate-200 p-2 text-sm" value={activeFilter} onChange={(e) => setActiveFilter(e.target.value as "all" | "active" | "inactive" | "featured") }>
+            <option value="all">Todos</option>
+            <option value="active">Activos</option>
+            <option value="inactive">Inactivos</option>
+            <option value="featured">Featured</option>
+          </select>
+        </div>
 
-      <div className="overflow-x-auto rounded-xl border border-uiBorder bg-surface">
-        <table className="w-full text-sm">
-          <thead className="bg-surfaceMuted text-left text-mutedText">
-            <tr>
-              <th className="px-3 py-2">Foto</th>
-              <th className="px-3 py-2">Item #</th>
-              <th className="px-3 py-2">Department</th>
-              <th className="px-3 py-2">Item Description</th>
-              <th className="px-3 py-2">Qty</th>
-              <th className="px-3 py-2">Seller Category</th>
-              <th className="px-3 py-2">Category</th>
-              <th className="px-3 py-2">Condition</th>
-              <th className="px-3 py-2">Activo</th>
-              <th className="px-3 py-2">Featured</th>
-              <th className="px-3 py-2">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
+        <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <td className="px-3 py-8 text-center text-mutedText" colSpan={11}>No hay productos para mostrar</td>
+                <th className="px-3 py-2.5">Foto</th>
+                <th className="px-3 py-2.5">Item #</th>
+                <th className="px-3 py-2.5">Department</th>
+                <th className="px-3 py-2.5">Item Description</th>
+                <th className="px-3 py-2.5">Qty</th>
+                <th className="px-3 py-2.5">Seller Category</th>
+                <th className="px-3 py-2.5">Category</th>
+                <th className="px-3 py-2.5">Condition</th>
+                <th className="px-3 py-2.5">Activo</th>
+                <th className="px-3 py-2.5">Featured</th>
+                <th className="px-3 py-2.5">Acciones</th>
               </tr>
-            ) : (
-              filtered.map((p) => (
-                <tr key={p.id} className="border-t border-uiBorder">
-                  <td className="px-3 py-2">{p.image_url ? <img src={p.image_url} alt={p.name} className="h-10 w-10 rounded object-cover border border-uiBorder" /> : <span className="text-xs text-mutedText">Sin foto</span>}</td>
-                  <td className="px-3 py-2">{p.item_number ?? p.sku ?? "—"}</td>
-                  <td className="px-3 py-2">{p.department ?? "—"}</td>
-                  <td className="px-3 py-2 font-medium">{p.item_description || p.name}</td>
-                  <td className="px-3 py-2">{p.qty ?? p.base_stock}</td>
-                  <td className="px-3 py-2">{p.seller_category ?? "—"}</td>
-                  <td className="px-3 py-2">{p.category ?? p.category_ref?.name ?? "—"}</td>
-                  <td className="px-3 py-2">{p.condition ?? "—"}</td>
-                  <td className="px-3 py-2">{p.active ? "Sí" : "No"}</td>
-                  <td className="px-3 py-2">{p.featured ? "Sí" : "No"}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <button className="rounded border border-uiBorder px-2 py-1 text-xs" type="button" onClick={() => startEdit(p)}>Editar</button>
-                      <button className="rounded border border-red-300 px-2 py-1 text-xs text-red-700" type="button" onClick={() => removeProduct(p.id)}>Eliminar</button>
-                    </div>
-                  </td>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-10 text-center text-slate-500" colSpan={11}>No hay productos para mostrar</td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                filtered.map((p) => (
+                  <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50/70">
+                    <td className="px-3 py-2.5">{p.image_url ? <img src={p.image_url} alt={p.name} className="h-10 w-10 rounded-lg border border-slate-200 object-cover" /> : <span className="text-xs text-slate-400">Sin foto</span>}</td>
+                    <td className="px-3 py-2.5">{p.item_number ?? p.sku ?? "—"}</td>
+                    <td className="px-3 py-2.5">{p.department ?? "—"}</td>
+                    <td className="px-3 py-2.5 font-medium text-slate-800">{p.item_description || p.name}</td>
+                    <td className="px-3 py-2.5">{p.qty ?? p.base_stock}</td>
+                    <td className="px-3 py-2.5">{p.seller_category ?? "—"}</td>
+                    <td className="px-3 py-2.5">{p.category ?? p.category_ref?.name ?? "—"}</td>
+                    <td className="px-3 py-2.5">{p.condition ?? "—"}</td>
+                    <td className="px-3 py-2.5"><span className={p.active ? "rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700" : "rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-500"}>{p.active ? "Sí" : "No"}</span></td>
+                    <td className="px-3 py-2.5"><span className={p.featured ? "rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700" : "rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-500"}>{p.featured ? "Sí" : "No"}</span></td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <button className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700" type="button" onClick={() => startEdit(p)}>Editar</button>
+                        <button className="rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-700" type="button" onClick={() => removeProduct(p.id)}>Eliminar</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
