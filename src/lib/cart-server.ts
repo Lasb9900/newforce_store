@@ -32,7 +32,7 @@ export type CartNotice = {
 
 type CartInput = {
   productId?: string;
-  variantId?: string;
+  variantId?: string | null;
   qty: number;
 };
 

@@ -7,7 +7,7 @@ export const productIdParamSchema = z.object({ productId: z.string().uuid() });
 export const cartItemSchema = z
   .object({
     productId: z.string().uuid().optional(),
-    variantId: z.string().uuid().optional(),
+    variantId: z.string().uuid().nullable().optional(),
     qty: z.number().int().positive(),
   })
   .refine((v) => Boolean(v.productId || v.variantId), "productId or variantId required");

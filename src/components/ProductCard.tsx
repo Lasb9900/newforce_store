@@ -19,8 +19,10 @@ export function ProductCard({ product }: { product: Product }) {
   const categoryLabel = getDisplayCategory(product);
   const priceCents = getDisplayPriceCents(product);
   const compareAtPriceCents = getCompareAtPriceCents(product, priceCents);
-  const stock = getStockCount(product);
+  const selectedVariant = product.has_variants ? (product.variants ?? []).find((variant) => variant.active && variant.stock > 0) ?? product.variants?.[0] : null;
+  const stock = selectedVariant?.stock ?? getStockCount(product);
   const image = getPrimaryImage(product);
+  const productId = product.id;
 
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-uiBorder bg-surface shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl">
@@ -33,7 +35,7 @@ export function ProductCard({ product }: { product: Product }) {
         <ProductImage src={image.primary} alt={name} fill className="object-cover transition duration-500 group-hover:opacity-0" sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 20vw" />
         <ProductImage src={image.secondary ?? image.primary} alt={name} fill className="object-cover opacity-0 transition duration-500 group-hover:opacity-100" sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 20vw" />
 
-        <WishlistToggleButton productId={product.id} />
+        <WishlistToggleButton productId={productId} />
       </div>
 
       <div className="flex flex-1 flex-col gap-3 p-4">
@@ -42,15 +44,24 @@ export function ProductCard({ product }: { product: Product }) {
           <StockBadge stock={stock} />
         </div>
 
-        <Link href={`/product/${product.id}`} className="line-clamp-2 min-h-12 text-base font-semibold text-brand-ink hover:text-brand-primary">
+        <Link href={`/product/${productId}`} className="line-clamp-2 min-h-12 text-base font-semibold text-brand-ink hover:text-brand-primary">
           {name}
         </Link>
 
         {priceCents ? <PriceDisplay priceCents={priceCents} compareAtPriceCents={compareAtPriceCents} /> : <p className="text-sm font-medium text-mutedText">Price available at checkout</p>}
 
         <div className="mt-auto grid grid-cols-2 gap-2">
-          <AddToCartButton productId={product.id} name={name} unitPriceCents={priceCents ?? 0} stock={stock} imageUrl={image.primary} />
-          <Link href={`/product/${product.id}`} className="btn-secondary w-full text-sm">
+          <AddToCartButton
+            productId={productId}
+            variantId={selectedVariant?.id ?? null}
+            variantName={selectedVariant?.variant_name ?? null}
+            sku={selectedVariant?.sku ?? product.sku ?? null}
+            name={name}
+            unitPriceCents={selectedVariant?.price_cents ?? priceCents ?? 0}
+            stock={stock}
+            imageUrl={image.primary}
+          />
+          <Link href={`/product/${productId}`} className="btn-secondary w-full text-sm">
             View
           </Link>
         </div>

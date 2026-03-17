@@ -51,7 +51,7 @@ export type ProductImage = {
 
 export type CartItem = {
   productId: string;
-  variantId?: string;
+  variantId?: string | null;
   qty: number;
   name?: string;
   unitPriceCents?: number;
