@@ -19,6 +19,7 @@ export function AuthDebugPanel() {
   }, [initialize, refresh, pathname]);
 
   if (process.env.NODE_ENV !== "development") return null;
+  if (pathname.startsWith("/admin")) return null;
 
   return (
     <div className="fixed bottom-3 right-3 z-[9999] max-w-sm rounded-lg border border-slate-300 bg-white/95 p-3 text-[11px] shadow-lg">
