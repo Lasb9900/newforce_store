@@ -15,30 +15,20 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   const sb = await getServerSupabase();
 
   const { data: baseProduct, error: baseProductError } = await sb
-    .from("products")
-    .select("id")
-    .eq("id", id)
-    .eq("active", true)
-    .maybeSingle();
-
-  if (process.env.NODE_ENV !== "production") {
-    console.info("[PRODUCT_PAGE_DEBUG] product lookup", { id, found: Boolean(baseProduct), error: baseProductError?.message ?? null });
-  }
+  .from("products")
+  .select("id,name,active")
+  .eq("id", id)
+  .maybeSingle();
 
   if (baseProductError || !baseProduct) {
     notFound();
   }
 
   const { data: product } = await sb
-    .from("products")
-    .select("*, category:categories(*), images:product_images(*), variants:product_variants(*), reviews(rating,comment,status)")
-    .eq("id", baseProduct.id)
-    .eq("active", true)
-    .maybeSingle();
-
-  if (!product) {
-    notFound();
-  }
+  .from("products")
+  .select("*, reviews(rating,comment,status)")
+  .eq("id", baseProduct.id)
+  .maybeSingle();
 
   const images = (product.images ?? []).sort((a: { sort_order: number }, b: { sort_order: number }) => a.sort_order - b.sort_order);
   const image = getPrimaryImage(product);
