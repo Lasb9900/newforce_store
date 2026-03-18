@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
 import { env } from "@/lib/env";
@@ -9,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  console.log("[STRIPE_WEBHOOK][GET_HIT]");
+  console.log("[STRIPE_WEBHOOK][GET_HIT][/api/stripe/webhook]");
   return NextResponse.json({
     ok: true,
     route: "stripe-webhook",
@@ -20,7 +19,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  console.log("[STRIPE_WEBHOOK][POST_HIT]");
+  console.log("[STRIPE_WEBHOOK][POST_HIT][/api/stripe/webhook]");
 
   try {
     if (!stripe || !env.STRIPE_WEBHOOK_SECRET || !env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -37,10 +36,14 @@ export async function POST(req: Request) {
     }
 
     const body = await req.text();
-    console.log("[STRIPE_WEBHOOK][BODY_RECEIVED]", { length: body.length });
+    const signature = req.headers.get("stripe-signature");
 
-    const signature = (await headers()).get("stripe-signature");
-    console.log("[STRIPE_WEBHOOK][SIGNATURE_PRESENT]", Boolean(signature));
+    console.log("[STRIPE_WEBHOOK][BODY_RECEIVED]", { length: body.length });
+    console.log("[STRIPE_WEBHOOK][HEADERS_DUMP]", {
+      stripeSignaturePresent: Boolean(signature),
+      contentType: req.headers.get("content-type"),
+      userAgent: req.headers.get("user-agent"),
+    });
 
     if (!signature) {
       console.error("[STRIPE_WEBHOOK][MISSING_SIGNATURE]");
@@ -54,9 +57,10 @@ export async function POST(req: Request) {
         signature,
         env.STRIPE_WEBHOOK_SECRET
       );
+
       console.log("[STRIPE_WEBHOOK][EVENT_CONSTRUCTED]", {
-        type: event.type,
         id: event.id,
+        type: event.type,
       });
     } catch (error) {
       console.error("[STRIPE_WEBHOOK][SIGNATURE_ERROR]", error);
@@ -72,6 +76,8 @@ export async function POST(req: Request) {
     }
 
     const session = event.data.object;
+    const admin = getServiceSupabase();
+
     console.log("[STRIPE_WEBHOOK][SESSION_COMPLETED]", {
       sessionId: session.id,
       paymentIntent:
@@ -79,8 +85,6 @@ export async function POST(req: Request) {
           ? session.payment_intent
           : null,
     });
-
-    const admin = getServiceSupabase();
 
     const { data: order, error: findOrderError } = await admin
       .from("orders")
@@ -117,19 +121,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true, idempotent: true });
     }
 
-    const updatePayload: Record<string, unknown> = {
-      status: "paid",
-      payment_status: "paid",
-      stripe_payment_intent_id:
-        typeof session.payment_intent === "string"
-          ? session.payment_intent
-          : null,
-      payment_method: "stripe",
-    };
-
     const { error: markPaidError } = await admin
       .from("orders")
-      .update(updatePayload)
+      .update({
+        status: "paid",
+        payment_status: "paid",
+        stripe_payment_intent_id:
+          typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : null,
+        payment_method: "stripe",
+      })
       .eq("id", order.id);
 
     if (markPaidError) {
@@ -155,10 +157,6 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log("[STRIPE_WEBHOOK][ORDER_ITEMS_FOUND]", {
-      count: orderItems?.length ?? 0,
-    });
-
     for (const item of orderItems ?? []) {
       const qty = Number(item.quantity ?? item.qty ?? 0);
       if (!qty || qty < 1) continue;
@@ -171,11 +169,6 @@ export async function POST(req: Request) {
 
         if (error) {
           console.error("[STRIPE_WEBHOOK][DECREMENT_VARIANT_ERROR]", error, item);
-        } else {
-          console.log("[STRIPE_WEBHOOK][DECREMENT_VARIANT_OK]", {
-            variantId: item.variant_id,
-            qty,
-          });
         }
       } else {
         const { error } = await admin.rpc("decrement_product_stock", {
@@ -185,11 +178,6 @@ export async function POST(req: Request) {
 
         if (error) {
           console.error("[STRIPE_WEBHOOK][DECREMENT_PRODUCT_ERROR]", error, item);
-        } else {
-          console.log("[STRIPE_WEBHOOK][DECREMENT_PRODUCT_OK]", {
-            productId: item.product_id,
-            qty,
-          });
         }
       }
     }
@@ -208,8 +196,6 @@ export async function POST(req: Request) {
 
     if (orderEventError) {
       console.error("[STRIPE_WEBHOOK][ORDER_EVENT_ERROR]", orderEventError);
-    } else {
-      console.log("[STRIPE_WEBHOOK][ORDER_EVENT_OK]", { orderId: order.id });
     }
 
     if (order.user_id) {
@@ -232,21 +218,6 @@ export async function POST(req: Request) {
             "[STRIPE_WEBHOOK][DELETE_CART_ITEMS_ERROR]",
             deleteCartItemsError
           );
-        } else {
-          console.log("[STRIPE_WEBHOOK][DELETE_CART_ITEMS_OK]", {
-            cartId: userCart.id,
-          });
-        }
-
-        const { error: updateCartError } = await admin
-          .from("carts")
-          .update({ updated_at: new Date().toISOString() })
-          .eq("id", userCart.id);
-
-        if (updateCartError) {
-          console.error("[STRIPE_WEBHOOK][UPDATE_CART_ERROR]", updateCartError);
-        } else {
-          console.log("[STRIPE_WEBHOOK][UPDATE_CART_OK]", { cartId: userCart.id });
         }
       }
     }
@@ -263,7 +234,6 @@ export async function POST(req: Request) {
           stripe_session_id: session.id,
         },
       });
-      console.log("[STRIPE_WEBHOOK][LOYALTY_OK]", { orderId: order.id });
     } catch (error) {
       console.error("[STRIPE_WEBHOOK][LOYALTY_ERROR]", error);
     }
