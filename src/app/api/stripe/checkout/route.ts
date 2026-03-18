@@ -1,151 +1,280 @@
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { stripeCheckoutSchema } from "@/lib/schemas";
-import { getServerSupabase } from "@/lib/supabase";
 import { stripe } from "@/lib/stripe";
 import { env } from "@/lib/env";
-import { validateCartItems } from "@/lib/checkout";
-import { calculateTaxCents, resolveShippingOption } from "@/lib/shipping";
-import { getShippingOptions } from "@/lib/services/shipping.service";
-import { buildCheckoutPricing } from "@/lib/services/checkout-pricing.service";
-import { buildStripeLineItems } from "@/lib/services/stripe-checkout.service";
-import { loadUserCart } from "@/lib/cart-server";
+import { getServiceSupabase } from "@/lib/supabase";
+import { processLoyaltyAccrual } from "@/lib/services/loyalty.service";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  console.log("[STRIPE_WEBHOOK][GET_HIT]");
+  return NextResponse.json({
+    ok: true,
+    route: "stripe-webhook",
+    hasStripe: Boolean(stripe),
+    hasWebhookSecret: Boolean(env.STRIPE_WEBHOOK_SECRET),
+    hasServiceRole: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
+  });
+}
 
 export async function POST(req: Request) {
-  const parsed = stripeCheckoutSchema.safeParse(await req.json());
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  }
-
-  if (!stripe) {
-    return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
-  }
+  console.log("[STRIPE_WEBHOOK][POST_HIT]");
 
   try {
-    const sb = await getServerSupabase();
-    const {
-      data: { user },
-    } = await sb.auth.getUser();
+    if (!stripe || !env.STRIPE_WEBHOOK_SECRET || !env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error("[STRIPE_WEBHOOK][CONFIG_ERROR]", {
+        hasStripe: Boolean(stripe),
+        hasWebhookSecret: Boolean(env.STRIPE_WEBHOOK_SECRET),
+        hasServiceRole: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
+      });
 
-    const cartInput = user
-      ? (await loadUserCart(sb, user.id)).items.map((item) => ({ productId: item.productId, variantId: item.variantId, qty: item.qty }))
-      : parsed.data.items;
-
-    const validatedCart = await validateCartItems(sb, cartInput);
-    const { options: shippingOptions } = await getShippingOptions({
-      subtotalCents: validatedCart.subtotal_cents,
-      destinationPostalCode: parsed.data.shipping.postal_code,
-      destinationState: parsed.data.shipping.state,
-      destinationCountry: parsed.data.shipping.country,
-      weightGrams: validatedCart.total_weight_grams,
-    });
-
-    const selectedShipping = resolveShippingOption(shippingOptions, parsed.data.shipping_option_id);
-    if (!selectedShipping) {
-      return NextResponse.json({ error: "Selected shipping option is no longer available" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Stripe/Supabase not configured" },
+        { status: 500 }
+      );
     }
 
-    const pricing = buildCheckoutPricing({
-      cart: validatedCart,
-      shippingCents: selectedShipping.amount_cents,
-      taxCents: calculateTaxCents(),
-      discountCents: 0,
+    const body = await req.text();
+    console.log("[STRIPE_WEBHOOK][BODY_RECEIVED]", { length: body.length });
+
+    const signature = (await headers()).get("stripe-signature");
+    console.log("[STRIPE_WEBHOOK][SIGNATURE_PRESENT]", Boolean(signature));
+
+    if (!signature) {
+      console.error("[STRIPE_WEBHOOK][MISSING_SIGNATURE]");
+      return NextResponse.json({ error: "Missing signature" }, { status: 400 });
+    }
+
+    let event;
+    try {
+      event = stripe.webhooks.constructEvent(
+        body,
+        signature,
+        env.STRIPE_WEBHOOK_SECRET
+      );
+      console.log("[STRIPE_WEBHOOK][EVENT_CONSTRUCTED]", {
+        type: event.type,
+        id: event.id,
+      });
+    } catch (error) {
+      console.error("[STRIPE_WEBHOOK][SIGNATURE_ERROR]", error);
+      return NextResponse.json(
+        { error: (error as Error).message },
+        { status: 400 }
+      );
+    }
+
+    if (event.type !== "checkout.session.completed") {
+      console.log("[STRIPE_WEBHOOK][IGNORED_EVENT]", { type: event.type });
+      return NextResponse.json({ received: true, ignored: true });
+    }
+
+    const session = event.data.object;
+    console.log("[STRIPE_WEBHOOK][SESSION_COMPLETED]", {
+      sessionId: session.id,
+      paymentIntent:
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : null,
     });
 
-    const { data: order, error: orderError } = await sb
+    const admin = getServiceSupabase();
+
+    const { data: order, error: findOrderError } = await admin
       .from("orders")
-      .insert({
-        user_id: user?.id ?? null,
-        buyer_email: parsed.data.shipping.email,
-        buyer_name: parsed.data.shipping.full_name,
-        buyer_phone: parsed.data.shipping.phone,
-        email: parsed.data.shipping.email,
-        full_name: parsed.data.shipping.full_name,
-        phone: parsed.data.shipping.phone,
-        subtotal_cents: pricing.subtotal_cents,
-        shipping_cents: pricing.shipping_cents,
-        tax_cents: pricing.tax_cents,
-        total_cents: pricing.total_cents,
-        status: "pending",
-        payment_status: "pending",
-        currency: "USD",
-        shipping_address: {
-          line1: parsed.data.shipping.address_line_1,
-          line2: parsed.data.shipping.address_line_2 || null,
-          city: parsed.data.shipping.city,
-          state: parsed.data.shipping.state,
-          postal_code: parsed.data.shipping.postal_code,
-          country: parsed.data.shipping.country,
-          delivery_notes: parsed.data.shipping.delivery_notes || null,
-        },
-        shipping_address_line_1: parsed.data.shipping.address_line_1,
-        shipping_city: parsed.data.shipping.city,
-        shipping_state: parsed.data.shipping.state,
-        shipping_postal_code: parsed.data.shipping.postal_code,
-        shipping_country: parsed.data.shipping.country,
-      })
-      .select("id")
-      .single();
+      .select("id,status,payment_status,total_cents,user_id,buyer_email,stripe_session_id")
+      .eq("stripe_session_id", session.id)
+      .maybeSingle();
 
-    if (orderError || !order) {
-      return NextResponse.json({ error: orderError?.message ?? "Unable to create preliminary order" }, { status: 500 });
+    if (findOrderError) {
+      console.error("[STRIPE_WEBHOOK][FIND_ORDER_ERROR]", findOrderError);
+      return NextResponse.json(
+        { error: findOrderError.message },
+        { status: 500 }
+      );
     }
 
-    const { error: orderItemsError } = await sb.from("order_items").insert(
-      validatedCart.items.map((item) => ({
-        order_id: order.id,
-        product_id: item.product_id,
-        variant_id: item.variant_id,
-        qty: item.quantity,
-        quantity: item.quantity,
-        unit_price_cents_snapshot: item.unit_price_cents,
-        unit_price_cents: item.unit_price_cents,
-        line_total_cents: item.line_total_cents,
-        name_snapshot: item.product_name_snapshot,
-        product_name_snapshot: item.product_name_snapshot,
-      })),
-    );
+    if (!order) {
+      console.error("[STRIPE_WEBHOOK][ORDER_NOT_FOUND]", {
+        stripe_session_id: session.id,
+      });
+      return NextResponse.json(
+        { error: "Order not found for session" },
+        { status: 404 }
+      );
+    }
+
+    console.log("[STRIPE_WEBHOOK][ORDER_FOUND]", {
+      orderId: order.id,
+      status: order.status,
+      paymentStatus: order.payment_status,
+    });
+
+    if (order.status === "paid" && order.payment_status === "paid") {
+      console.log("[STRIPE_WEBHOOK][IDEMPOTENT_SUCCESS]", { orderId: order.id });
+      return NextResponse.json({ received: true, idempotent: true });
+    }
+
+    const updatePayload: Record<string, unknown> = {
+      status: "paid",
+      payment_status: "paid",
+      stripe_payment_intent_id:
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : null,
+      payment_method: "stripe",
+    };
+
+    const { error: markPaidError } = await admin
+      .from("orders")
+      .update(updatePayload)
+      .eq("id", order.id);
+
+    if (markPaidError) {
+      console.error("[STRIPE_WEBHOOK][MARK_PAID_ERROR]", markPaidError);
+      return NextResponse.json(
+        { error: markPaidError.message },
+        { status: 500 }
+      );
+    }
+
+    console.log("[STRIPE_WEBHOOK][ORDER_MARKED_PAID]", { orderId: order.id });
+
+    const { data: orderItems, error: orderItemsError } = await admin
+      .from("order_items")
+      .select("id,product_id,variant_id,quantity,qty")
+      .eq("order_id", order.id);
 
     if (orderItemsError) {
-      return NextResponse.json({ error: orderItemsError.message }, { status: 500 });
+      console.error("[STRIPE_WEBHOOK][ORDER_ITEMS_ERROR]", orderItemsError);
+      return NextResponse.json(
+        { error: orderItemsError.message },
+        { status: 500 }
+      );
     }
 
-    const lineItems = buildStripeLineItems({
-      cart: validatedCart,
-      shippingName: selectedShipping.name,
-      shippingCents: pricing.shipping_cents,
+    console.log("[STRIPE_WEBHOOK][ORDER_ITEMS_FOUND]", {
+      count: orderItems?.length ?? 0,
     });
 
-    const successUrl = env.STRIPE_SUCCESS_URL ?? `${env.NEXT_PUBLIC_SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = env.STRIPE_CANCEL_URL ?? `${env.NEXT_PUBLIC_SITE_URL}/cancel`;
+    for (const item of orderItems ?? []) {
+      const qty = Number(item.quantity ?? item.qty ?? 0);
+      if (!qty || qty < 1) continue;
 
-    const session = await stripe.checkout.sessions.create({
-      client_reference_id: user?.id,
-      mode: "payment",
-      line_items: lineItems,
-      customer_email: parsed.data.shipping.email,
-      shipping_address_collection: { allowed_countries: ["US"] },
-      phone_number_collection: { enabled: true },
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      metadata: {
-        order_id: order.id,
-        shipping_option_id: parsed.data.shipping_option_id,
+      if (item.variant_id) {
+        const { error } = await admin.rpc("decrement_variant_stock", {
+          variant_id: item.variant_id,
+          qty,
+        });
+
+        if (error) {
+          console.error("[STRIPE_WEBHOOK][DECREMENT_VARIANT_ERROR]", error, item);
+        } else {
+          console.log("[STRIPE_WEBHOOK][DECREMENT_VARIANT_OK]", {
+            variantId: item.variant_id,
+            qty,
+          });
+        }
+      } else {
+        const { error } = await admin.rpc("decrement_product_stock", {
+          product_id: item.product_id,
+          qty,
+        });
+
+        if (error) {
+          console.error("[STRIPE_WEBHOOK][DECREMENT_PRODUCT_ERROR]", error, item);
+        } else {
+          console.log("[STRIPE_WEBHOOK][DECREMENT_PRODUCT_OK]", {
+            productId: item.product_id,
+            qty,
+          });
+        }
+      }
+    }
+
+    const { error: orderEventError } = await admin.from("order_events").insert({
+      order_id: order.id,
+      event_type: "checkout_session_completed",
+      payload: {
+        stripe_session_id: session.id,
+        stripe_payment_intent_id:
+          typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : null,
       },
     });
 
-    const { error: updateOrderError } = await sb
-      .from("orders")
-      .update({ stripe_session_id: session.id })
-      .eq("id", order.id);
-
-    if (updateOrderError) {
-      return NextResponse.json({ error: updateOrderError.message }, { status: 500 });
+    if (orderEventError) {
+      console.error("[STRIPE_WEBHOOK][ORDER_EVENT_ERROR]", orderEventError);
+    } else {
+      console.log("[STRIPE_WEBHOOK][ORDER_EVENT_OK]", { orderId: order.id });
     }
 
-    await sb.from("order_events").insert({ order_id: order.id, event_type: "checkout_session_created", payload: { stripe_session_id: session.id } });
+    if (order.user_id) {
+      const { data: userCart, error: cartLookupError } = await admin
+        .from("carts")
+        .select("id")
+        .eq("user_id", order.user_id)
+        .maybeSingle();
 
-    return NextResponse.json({ url: session.url });
-  } catch {
-    return NextResponse.json({ error: "Unable to start secure payment" }, { status: 500 });
+      if (cartLookupError) {
+        console.error("[STRIPE_WEBHOOK][CART_LOOKUP_ERROR]", cartLookupError);
+      } else if (userCart?.id) {
+        const { error: deleteCartItemsError } = await admin
+          .from("cart_items")
+          .delete()
+          .eq("cart_id", userCart.id);
+
+        if (deleteCartItemsError) {
+          console.error(
+            "[STRIPE_WEBHOOK][DELETE_CART_ITEMS_ERROR]",
+            deleteCartItemsError
+          );
+        } else {
+          console.log("[STRIPE_WEBHOOK][DELETE_CART_ITEMS_OK]", {
+            cartId: userCart.id,
+          });
+        }
+
+        const { error: updateCartError } = await admin
+          .from("carts")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", userCart.id);
+
+        if (updateCartError) {
+          console.error("[STRIPE_WEBHOOK][UPDATE_CART_ERROR]", updateCartError);
+        } else {
+          console.log("[STRIPE_WEBHOOK][UPDATE_CART_OK]", { cartId: userCart.id });
+        }
+      }
+    }
+
+    try {
+      await processLoyaltyAccrual({
+        sourceType: "online_order",
+        sourceId: order.id,
+        amountCents: Number(order.total_cents ?? 0),
+        userId: order.user_id ?? null,
+        email: order.buyer_email ?? null,
+        metadata: {
+          channel: "online",
+          stripe_session_id: session.id,
+        },
+      });
+      console.log("[STRIPE_WEBHOOK][LOYALTY_OK]", { orderId: order.id });
+    } catch (error) {
+      console.error("[STRIPE_WEBHOOK][LOYALTY_ERROR]", error);
+    }
+
+    console.log("[STRIPE_WEBHOOK][SUCCESS]", { orderId: order.id });
+    return NextResponse.json({ received: true });
+  } catch (error) {
+    console.error("[STRIPE_WEBHOOK][UNHANDLED_ERROR]", error);
+    return NextResponse.json(
+      { error: "Unhandled webhook failure" },
+      { status: 500 }
+    );
   }
 }
