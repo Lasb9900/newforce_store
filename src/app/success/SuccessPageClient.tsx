@@ -124,74 +124,100 @@ useEffect(() => {
 }, [currentUserId, initialize, sessionId]);
 
   return (
-    <section className="mx-auto max-w-2xl px-4 py-10">
-      {state === "loading" && (
-        <>
-          <h1 className="text-2xl font-bold">Estamos confirmando tu pago</h1>
-          <p className="mt-2 text-sm text-mutedText">
-            Recibimos tu regreso desde Stripe. Ahora estamos verificando la
-            confirmación final de tu pedido.
-          </p>
-        </>
-      )}
+  <section className="mx-auto max-w-xl px-4 py-16 text-center">
+    
+    {/* ICONO */}
+    <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+      <svg
+        className="h-8 w-8 text-green-600"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={3}
+        viewBox="0 0 24 24"
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+      </svg>
+    </div>
 
-      {state === "processing" && (
-        <>
-          <h1 className="text-2xl font-bold">
-            Tu pago está en proceso de confirmación
-          </h1>
-          <p className="mt-2 text-sm text-mutedText">
-            Stripe reportó la sesión correctamente, pero el sistema aún está
-            terminando de reflejar la orden como pagada.
-          </p>
-        </>
-      )}
+    {/* TITULO */}
+    <h1 className="text-3xl font-bold tracking-tight">
+      {state === "paid"
+        ? "Pago confirmado"
+        : state === "processing"
+        ? "Procesando tu pago"
+        : state === "error"
+        ? "Ocurrió un problema"
+        : "Validando pago"}
+    </h1>
 
-      {state === "paid" && (
-        <>
-          <h1 className="text-2xl font-bold">Pago exitoso</h1>
-          <p className="mt-2 text-sm text-mutedText">
-            Tu pedido fue confirmado correctamente.
-          </p>
-        </>
-      )}
+    {/* DESCRIPCION */}
+    <p className="mt-3 text-sm text-mutedText">
+      {state === "paid" &&
+        "Tu pedido fue procesado correctamente. Recibirás una confirmación por correo."}
 
-      {state === "invalid" && (
-        <>
-          <h1 className="text-2xl font-bold">No pudimos validar este pago</h1>
-          <p className="mt-2 text-sm text-mutedText">
-            Esta página no tiene una sesión válida de Stripe o la orden no fue
-            encontrada.
-          </p>
-        </>
-      )}
+      {state === "processing" &&
+        "Estamos terminando de confirmar tu pago. Esto puede tomar unos segundos."}
 
-      {state === "error" && (
-        <>
-          <h1 className="text-2xl font-bold">
-            Ocurrió un problema al validar tu pago
-          </h1>
-          <p className="mt-2 text-sm text-mutedText">
-            No pudimos confirmar el estado final de la orden desde esta página.
-          </p>
-        </>
-      )}
+      {state === "loading" &&
+        "Estamos verificando la confirmación con Stripe."}
 
-      {sessionId && (
-        <p className="mt-4 break-all text-xs text-mutedText">
-          Session: {sessionId}
-        </p>
-      )}
+      {state === "error" &&
+        "No pudimos confirmar tu pago en este momento."}
 
-      {details?.orderId && (
-        <p className="mt-2 text-xs text-mutedText">Orden: {details.orderId}</p>
-      )}
+      {state === "invalid" &&
+        "No encontramos información válida para esta sesión."}
+    </p>
 
-      {details?.stripePaymentStatus && (
-        <p className="mt-1 text-xs text-mutedText">
-          Stripe payment status: {details.stripePaymentStatus}
-        </p>
-      )}
-    </section>
-  );
+    {/* CARD INFO */}
+    {(details?.orderId || sessionId) && (
+      <div className="mt-8 rounded-xl border bg-white p-6 text-left shadow-sm">
+        <h2 className="mb-4 text-sm font-semibold text-gray-500">
+          Detalles del pedido
+        </h2>
+
+        {details?.orderId && (
+          <div className="flex justify-between text-sm mb-2">
+            <span className="text-mutedText">Orden</span>
+            <span className="font-medium">{details.orderId}</span>
+          </div>
+        )}
+
+        {details?.stripePaymentStatus && (
+          <div className="flex justify-between text-sm mb-2">
+            <span className="text-mutedText">Estado</span>
+            <span className="font-medium text-green-600">
+              {details.stripePaymentStatus}
+            </span>
+          </div>
+        )}
+
+        {sessionId && (
+          <div className="flex justify-between text-sm">
+            <span className="text-mutedText">Session</span>
+            <span className="font-mono text-xs truncate max-w-[200px]">
+              {sessionId}
+            </span>
+          </div>
+        )}
+      </div>
+    )}
+
+    {/* BOTONES */}
+    <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
+      <a
+        href="/shop"
+        className="rounded-lg bg-black px-6 py-3 text-sm font-medium text-white hover:opacity-90 transition"
+      >
+        Seguir comprando
+      </a>
+
+      <a
+        href="/account/orders"
+        className="rounded-lg border px-6 py-3 text-sm font-medium hover:bg-gray-50 transition"
+      >
+        Ver mis pedidos
+      </a>
+    </div>
+  </section>
+);
 }
