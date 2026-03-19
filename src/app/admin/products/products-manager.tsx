@@ -34,6 +34,8 @@ type ProductRow = {
   category_id: string | null;
   category_ref?: { name?: string | null; slug?: string | null } | null;
   image_url?: string | null;
+  redeemable?: boolean;
+  points_price?: number | null;
 };
 
 type ProductForm = {
@@ -54,6 +56,8 @@ type ProductForm = {
   base_price_cents: number | null;
   qty: number;
   tags: string[];
+  redeemable: boolean;
+  points_price: number | null;
 };
 
 const EMPTY_FORM: ProductForm = {
@@ -74,6 +78,8 @@ const EMPTY_FORM: ProductForm = {
   base_price_cents: null,
   qty: 0,
   tags: [],
+  redeemable: false,
+  points_price: null,
 };
 
 const PAGE_SIZE = 10;
@@ -81,7 +87,9 @@ const PAGE_SIZE = 10;
 export default function ProductsManager({ initialProducts }: { initialProducts: ProductRow[] }) {
   const [products, setProducts] = useState<ProductRow[]>(initialProducts ?? []);
   const [query, setQuery] = useState("");
-  const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive" | "featured">("all");
+  const [activeFilter, setActiveFilter] = useState<
+    "all" | "active" | "inactive" | "featured" | "redeemable"
+  >("all");
   const [currentPage, setCurrentPage] = useState(1);
 
   const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
@@ -96,12 +104,14 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
 
   const filtered = useMemo(() => {
     return products.filter((product) => {
+      const normalizedQuery = query.toLowerCase();
+
       const matchQuery =
         !query ||
-        product.name.toLowerCase().includes(query.toLowerCase()) ||
-        (product.sku ?? "").toLowerCase().includes(query.toLowerCase()) ||
-        (product.item_description ?? "").toLowerCase().includes(query.toLowerCase()) ||
-        (product.category ?? "").toLowerCase().includes(query.toLowerCase());
+        product.name.toLowerCase().includes(normalizedQuery) ||
+        (product.sku ?? "").toLowerCase().includes(normalizedQuery) ||
+        (product.item_description ?? "").toLowerCase().includes(normalizedQuery) ||
+        (product.category ?? "").toLowerCase().includes(normalizedQuery);
 
       const matchActive =
         activeFilter === "all" ||
@@ -109,7 +119,9 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
           ? product.active
           : activeFilter === "inactive"
             ? !product.active
-            : product.featured);
+            : activeFilter === "featured"
+              ? product.featured
+              : Boolean(product.redeemable));
 
       return matchQuery && matchActive;
     });
@@ -132,7 +144,11 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     if (!res.ok) throw new Error(json.error || "No se pudo refrescar productos");
 
     const normalized = (json.data ?? []).map(
-      (row: ProductRow & { images?: Array<{ url: string; sort_order: number }> }) => {
+      (
+        row: ProductRow & {
+          images?: Array<{ url: string; sort_order: number }>;
+        },
+      ) => {
         const images = Array.isArray(row.images) ? [...row.images] : [];
         const primary = images.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0];
         return { ...row, image_url: primary?.url ?? row.image_url ?? null };
@@ -171,6 +187,8 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       base_price_cents: product.base_price_cents ?? null,
       qty: product.qty ?? product.base_stock ?? 0,
       tags: [],
+      redeemable: Boolean(product.redeemable),
+      points_price: product.points_price ?? null,
     });
     setMessage(null);
     setError(null);
@@ -238,6 +256,11 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       return;
     }
 
+    if (form.redeemable && (!form.points_price || form.points_price <= 0)) {
+      setError("Si el producto es redimible debes colocar un precio en puntos mayor a 0");
+      return;
+    }
+
     const normalizedPrice = form.price_cents ?? null;
     const normalizedBasePrice = form.base_price_cents ?? form.price_cents ?? null;
 
@@ -256,6 +279,8 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       qty: form.qty,
       base_stock: form.qty,
       featured_rank: form.featured ? form.featured_rank : 0,
+      redeemable: form.redeemable,
+      points_price: form.redeemable ? form.points_price : null,
     };
 
     const endpoint = editingId ? `/api/admin/products/${editingId}` : "/api/admin/products";
@@ -268,7 +293,15 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
 
     const json = await response.json();
     if (!response.ok) {
-      setError(json.error?.message || json.error || "No se pudo guardar producto");
+      const backendError =
+        typeof json.error === "string"
+          ? json.error
+          : json.error?.message ||
+            json.error?.formErrors?.[0] ||
+            Object.values(json.error?.fieldErrors ?? {}).flat()?.[0] ||
+            "No se pudo guardar producto";
+
+      setError(String(backendError));
       return;
     }
 
@@ -383,11 +416,17 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         </div>
       </div>
 
-      <form onSubmit={parseCsv} className="flex flex-wrap items-center gap-2 rounded-xl border border-uiBorder bg-surface p-3">
+      <form
+        onSubmit={parseCsv}
+        className="flex flex-wrap items-center gap-2 rounded-xl border border-uiBorder bg-surface p-3"
+      >
         <p className="text-sm text-mutedText">
           Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition
         </p>
-        <button type="submit" className="rounded-md border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted">
+        <button
+          type="submit"
+          className="rounded-md border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted"
+        >
           Leer CSV
         </button>
         {importPreview.length > 0 ? (
@@ -398,7 +437,10 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         {csvFile ? <p className="text-xs text-mutedText">Archivo: {csvFile.name}</p> : null}
       </form>
 
-      <form onSubmit={saveProduct} className="grid gap-3 rounded-xl border border-uiBorder bg-surface p-4 shadow-sm md:grid-cols-2">
+      <form
+        onSubmit={saveProduct}
+        className="grid gap-3 rounded-xl border border-uiBorder bg-surface p-4 shadow-sm md:grid-cols-2"
+      >
         <input
           className="rounded-md border border-uiBorder p-2.5"
           placeholder="Item # / SKU"
@@ -484,6 +526,36 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
           }
         />
 
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={form.redeemable}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                redeemable: e.target.checked,
+                points_price: e.target.checked ? f.points_price : null,
+              }))
+            }
+          />
+          Redimible por puntos
+        </label>
+
+        <input
+          type="number"
+          min={1}
+          disabled={!form.redeemable}
+          className="rounded-md border border-uiBorder p-2.5 disabled:cursor-not-allowed disabled:bg-surfaceMuted"
+          placeholder="Precio en puntos"
+          value={form.points_price ?? ""}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              points_price: e.target.value === "" ? null : Number(e.target.value),
+            }))
+          }
+        />
+
         <div className="md:col-span-2 rounded-md border border-uiBorder p-3">
           <p className="mb-2 text-sm font-semibold">Foto del producto</p>
           <div className="flex flex-wrap items-center gap-3">
@@ -504,7 +576,11 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
             </label>
             {imageFile ? <span className="text-xs text-mutedText">{imageFile.name}</span> : null}
             {imagePreview ? (
-              <img src={imagePreview} alt="preview" className="h-14 w-14 rounded object-cover border border-uiBorder" />
+              <img
+                src={imagePreview}
+                alt="preview"
+                className="h-14 w-14 rounded border border-uiBorder object-cover"
+              />
             ) : (
               <span className="text-xs text-mutedText">Sin imagen</span>
             )}
@@ -516,15 +592,16 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
             type="checkbox"
             checked={form.active}
             onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))}
-          />{" "}
+          />
           Activo
         </label>
+
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={form.featured}
             onChange={(e) => setForm((f) => ({ ...f, featured: e.target.checked }))}
-          />{" "}
+          />
           Featured
         </label>
 
@@ -533,7 +610,11 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
             {editingId ? "Guardar cambios" : "Crear producto"}
           </button>
           {editingId ? (
-            <button type="button" className="rounded-md border border-uiBorder px-3 py-2 text-sm" onClick={startNewProduct}>
+            <button
+              type="button"
+              className="rounded-md border border-uiBorder px-3 py-2 text-sm"
+              onClick={startNewProduct}
+            >
               Cancelar edición
             </button>
           ) : null}
@@ -593,7 +674,9 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
             className="rounded-md border border-uiBorder p-2 text-sm"
             value={activeFilter}
             onChange={(e) => {
-              setActiveFilter(e.target.value as "all" | "active" | "inactive" | "featured");
+              setActiveFilter(
+                e.target.value as "all" | "active" | "inactive" | "featured" | "redeemable",
+              );
               setCurrentPage(1);
             }}
           >
@@ -601,6 +684,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
             <option value="active">Activos</option>
             <option value="inactive">Inactivos</option>
             <option value="featured">Featured</option>
+            <option value="redeemable">Redimibles</option>
           </select>
         </div>
 
@@ -610,7 +694,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[1280px] text-sm">
+        <table className="w-full min-w-[1400px] text-sm">
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-4 py-3">Foto</th>
@@ -621,6 +705,8 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
               <th className="px-4 py-3">Seller Category</th>
               <th className="px-4 py-3">Category</th>
               <th className="px-4 py-3">Condition</th>
+              <th className="px-4 py-3">Puntos</th>
+              <th className="px-4 py-3">Redimible</th>
               <th className="px-4 py-3">Activo</th>
               <th className="px-4 py-3">Featured</th>
               <th className="px-4 py-3">Acciones</th>
@@ -629,7 +715,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
           <tbody>
             {paginatedProducts.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-mutedText" colSpan={11}>
+                <td className="px-3 py-8 text-center text-mutedText" colSpan={13}>
                   No hay productos para mostrar
                 </td>
               </tr>
@@ -638,7 +724,11 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
                 <tr key={p.id} className="border-t border-slate-200 align-middle transition hover:bg-slate-50/70">
                   <td className="px-4 py-3">
                     {p.image_url ? (
-                      <img src={p.image_url} alt={p.name} className="h-12 w-12 rounded-xl border border-slate-200 object-cover shadow-sm" />
+                      <img
+                        src={p.image_url}
+                        alt={p.name}
+                        className="h-12 w-12 rounded-xl border border-slate-200 object-cover shadow-sm"
+                      />
                     ) : (
                       <span className="text-xs text-mutedText">Sin foto</span>
                     )}
@@ -655,6 +745,18 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
                   <td className="px-4 py-3 text-slate-700">{p.seller_category ?? "—"}</td>
                   <td className="px-4 py-3 text-slate-700">{p.category ?? p.category_ref?.name ?? "—"}</td>
                   <td className="px-4 py-3 text-slate-700">{p.condition ?? "—"}</td>
+                  <td className="px-4 py-3 text-slate-700">{p.points_price ?? "—"}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                        p.redeemable
+                          ? "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200"
+                          : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                      }`}
+                    >
+                      {p.redeemable ? "Sí" : "No"}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${

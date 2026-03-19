@@ -19,7 +19,10 @@ export const checkoutShippingSchema = z.object({
   address_line_1: z.string().min(3),
   address_line_2: z.string().max(200).optional(),
   city: z.string().min(2),
-  state: z.string().transform((v) => v.toUpperCase()).refine((v) => US_STATE_SET.has(v), "Invalid US state"),
+  state: z
+    .string()
+    .transform((v) => v.toUpperCase())
+    .refine((v) => US_STATE_SET.has(v), "Invalid US state"),
   postal_code: z.string().refine((v) => US_ZIP_REGEX.test(v), "Invalid US ZIP"),
   country: z.literal("US"),
   delivery_notes: z.string().max(1000).optional(),
@@ -71,6 +74,8 @@ export const adminProductSchema = z.object({
   price_cents: z.number().int().nonnegative().nullable().optional(),
   base_stock: z.number().int().nonnegative().default(0),
   qty: z.number().int().nonnegative().optional(),
+  redeemable: z.boolean().default(false),
+  points_price: z.number().int().positive().nullable().optional(),
 });
 
 export const adminVariantSchema = z.object({
@@ -81,7 +86,6 @@ export const adminVariantSchema = z.object({
   sku: z.string().nullable().optional(),
   active: z.boolean().default(true),
 });
-
 
 export const registerSchema = z.object({
   first_name: z.string().min(2),
@@ -115,8 +119,8 @@ export const createPosClosureSchema = z.object({
 export const redeemPointsSchema = z.object({
   productId: z.string().uuid(),
   qty: z.number().int().positive().max(20),
+  shipping: checkoutShippingSchema,
 });
-
 
 export const loginSchema = z.object({
   email: z.string().email(),

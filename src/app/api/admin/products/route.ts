@@ -12,6 +12,10 @@ function normalizeProductPayload(payload: Record<string, unknown>) {
   const condition = (payload.condition as string | null | undefined) ?? null;
   const categoryText = (payload.category as string | null | undefined) ?? null;
 
+  const redeemable = Boolean(payload.redeemable);
+  const pointsPrice =
+    redeemable && typeof payload.points_price === "number" ? payload.points_price : null;
+
   return {
     ...payload,
     sku,
@@ -22,23 +26,37 @@ function normalizeProductPayload(payload: Record<string, unknown>) {
     price_cents: priceCents,
     condition,
     category: categoryText,
+    redeemable,
+    points_price: pointsPrice,
   };
 }
 
 export async function GET() {
   const auth = await requireOwnerApi();
   if ("error" in auth) return auth.error;
-  const { data } = await auth.supabase.from("products").select("*, category_ref:categories(name,slug), variants:product_variants(*), images:product_images(*)");
+
+  const { data } = await auth.supabase
+    .from("products")
+    .select("*, category_ref:categories(name,slug), variants:product_variants(*), images:product_images(*)");
+
   return NextResponse.json({ data: data ?? [] });
 }
 
 export async function POST(req: Request) {
   const auth = await requireOwnerApi();
   if ("error" in auth) return auth.error;
+
   const parsed = adminProductSchema.safeParse(await req.json());
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
   const payload = normalizeProductPayload(parsed.data as Record<string, unknown>);
   const { data, error } = await auth.supabase.from("products").insert(payload).select().single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
   return NextResponse.json({ data });
 }
