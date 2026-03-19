@@ -16,6 +16,68 @@ function getPaymentIntentId(
     : null;
 }
 
+type CheckoutSessionWithShipping = Stripe.Checkout.Session & {
+  shipping_details?: {
+    name?: string | null;
+    address?: {
+      line1?: string | null;
+      line2?: string | null;
+      city?: string | null;
+      state?: string | null;
+      postal_code?: string | null;
+      country?: string | null;
+    } | null;
+  } | null;
+  customer_details?: {
+    name?: string | null;
+    phone?: string | null;
+    address?: {
+      line1?: string | null;
+      line2?: string | null;
+      city?: string | null;
+      state?: string | null;
+      postal_code?: string | null;
+      country?: string | null;
+    } | null;
+  } | null;
+};
+
+function getShippingFieldsFromStripe(session: Stripe.Checkout.Session) {
+  const safeSession = session as CheckoutSessionWithShipping;
+
+  const shippingAddress = safeSession.shipping_details?.address ?? null;
+  const customerAddress = safeSession.customer_details?.address ?? null;
+  const finalAddress = shippingAddress ?? customerAddress;
+
+  const shippingName =
+    safeSession.shipping_details?.name ??
+    safeSession.customer_details?.name ??
+    null;
+
+  const shippingPhone = safeSession.customer_details?.phone ?? null;
+
+  return {
+    buyer_name: shippingName,
+    buyer_phone: shippingPhone,
+    shipping_address: finalAddress
+      ? {
+          line1: finalAddress.line1 ?? null,
+          line2: finalAddress.line2 ?? null,
+          city: finalAddress.city ?? null,
+          state: finalAddress.state ?? null,
+          postal_code: finalAddress.postal_code ?? null,
+          country: finalAddress.country ?? null,
+        }
+      : null,
+    shipping_address_line_1: finalAddress?.line1 ?? null,
+    shipping_address_line_2: finalAddress?.line2 ?? null,
+    shipping_city: finalAddress?.city ?? null,
+    shipping_state: finalAddress?.state ?? null,
+    shipping_postal_code: finalAddress?.postal_code ?? null,
+    shipping_country: finalAddress?.country ?? null,
+  };
+}
+
 export async function GET() {
   return NextResponse.json({
     ok: true,
@@ -68,13 +130,9 @@ export async function POST(req: Request) {
     }
 
     const session = event.data.object as Stripe.Checkout.Session;
+    const safeSession = session as CheckoutSessionWithShipping;
 
     if (session.payment_status !== "paid") {
-      console.warn("[STRIPE_WEBHOOK][SESSION_NOT_PAID]", {
-        sessionId: session.id,
-        paymentStatus: session.payment_status,
-      });
-
       return NextResponse.json({
         received: true,
         ignored: true,
@@ -86,9 +144,7 @@ export async function POST(req: Request) {
 
     const { data: order, error: findOrderError } = await admin
       .from("orders")
-      .select(
-        "id,status,payment_status,total_cents,user_id,buyer_email,stripe_session_id"
-      )
+      .select("id,status,payment_status,total_cents,user_id,buyer_email,stripe_session_id")
       .eq("stripe_session_id", session.id)
       .maybeSingle();
 
@@ -101,9 +157,6 @@ export async function POST(req: Request) {
     }
 
     if (!order) {
-      console.error("[STRIPE_WEBHOOK][ORDER_NOT_FOUND]", {
-        stripeSessionId: session.id,
-      });
       return NextResponse.json(
         { error: "Order not found for session" },
         { status: 404 }
@@ -114,15 +167,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true, idempotent: true });
     }
 
-    const paymentIntentId = getPaymentIntentId(session);
+    const shippingFields = getShippingFieldsFromStripe(session);
 
     const { error: markPaidError } = await admin
       .from("orders")
       .update({
         status: "paid",
         payment_status: "paid",
-        stripe_payment_intent_id: paymentIntentId,
+        stripe_payment_intent_id: getPaymentIntentId(session),
         payment_method: "stripe",
+        buyer_name: shippingFields.buyer_name,
+        buyer_phone: shippingFields.buyer_phone,
+        shipping_address: shippingFields.shipping_address,
+        shipping_address_line_1: shippingFields.shipping_address_line_1,
+        shipping_address_line_2: shippingFields.shipping_address_line_2,
+        shipping_city: shippingFields.shipping_city,
+        shipping_state: shippingFields.shipping_state,
+        shipping_postal_code: shippingFields.shipping_postal_code,
+        shipping_country: shippingFields.shipping_country,
         updated_at: new Date().toISOString(),
       })
       .eq("id", order.id);
@@ -178,8 +240,10 @@ export async function POST(req: Request) {
       event_type: "checkout_session_completed",
       payload: {
         stripe_session_id: session.id,
-        stripe_payment_intent_id: paymentIntentId,
+        stripe_payment_intent_id: getPaymentIntentId(session),
         payment_status: session.payment_status,
+        shipping_details: safeSession.shipping_details ?? null,
+customer_details: safeSession.customer_details ?? null,
       },
     });
 
@@ -209,7 +273,7 @@ export async function POST(req: Request) {
         metadata: {
           channel: "online",
           stripe_session_id: session.id,
-          stripe_payment_intent_id: paymentIntentId,
+          stripe_payment_intent_id: getPaymentIntentId(session),
         },
       });
     } catch (error) {
