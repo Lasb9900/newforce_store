@@ -29,6 +29,7 @@ type ProductRow = {
   qty?: number;
   active: boolean;
   featured: boolean;
+  featured_rank?: number | null;
   has_variants: boolean;
   category_id: string | null;
   category_ref?: { name?: string | null; slug?: string | null } | null;
@@ -50,6 +51,7 @@ type ProductForm = {
   category: string;
   condition: string;
   price_cents: number | null;
+  base_price_cents: number | null;
   qty: number;
   tags: string[];
 };
@@ -69,6 +71,7 @@ const EMPTY_FORM: ProductForm = {
   category: "",
   condition: "",
   price_cents: null,
+  base_price_cents: null,
   qty: 0,
   tags: [],
 };
@@ -92,36 +95,37 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
-  return products.filter((product) => {
-    const matchQuery =
-      !query ||
-      product.name.toLowerCase().includes(query.toLowerCase()) ||
-      (product.sku ?? "").toLowerCase().includes(query.toLowerCase()) ||
-      (product.item_description ?? "").toLowerCase().includes(query.toLowerCase()) ||
-      (product.category ?? "").toLowerCase().includes(query.toLowerCase());
+    return products.filter((product) => {
+      const matchQuery =
+        !query ||
+        product.name.toLowerCase().includes(query.toLowerCase()) ||
+        (product.sku ?? "").toLowerCase().includes(query.toLowerCase()) ||
+        (product.item_description ?? "").toLowerCase().includes(query.toLowerCase()) ||
+        (product.category ?? "").toLowerCase().includes(query.toLowerCase());
 
-    const matchActive =
-      activeFilter === "all" ||
-      (activeFilter === "active"
-        ? product.active
-        : activeFilter === "inactive"
-          ? !product.active
-          : product.featured);
+      const matchActive =
+        activeFilter === "all" ||
+        (activeFilter === "active"
+          ? product.active
+          : activeFilter === "inactive"
+            ? !product.active
+            : product.featured);
 
-    return matchQuery && matchActive;
-  });
-}, [products, query, activeFilter]);
+      return matchQuery && matchActive;
+    });
+  }, [products, query, activeFilter]);
 
-const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-const safeCurrentPage = Math.min(currentPage, totalPages);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
 
-const paginatedProducts = useMemo(() => {
-  const start = (safeCurrentPage - 1) * PAGE_SIZE;
-  return filtered.slice(start, start + PAGE_SIZE);
-}, [filtered, safeCurrentPage]);
+  const paginatedProducts = useMemo(() => {
+    const start = (safeCurrentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, safeCurrentPage]);
 
-const rangeStart = filtered.length === 0 ? 0 : (safeCurrentPage - 1) * PAGE_SIZE + 1;
-const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZE, filtered.length);
+  const rangeStart = filtered.length === 0 ? 0 : (safeCurrentPage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZE, filtered.length);
+
   async function refreshProducts() {
     const res = await fetch("/api/admin/products", { cache: "no-store" });
     const json = await res.json();
@@ -154,7 +158,7 @@ const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZ
       description: "",
       active: product.active,
       featured: product.featured,
-      featured_rank: 0,
+      featured_rank: product.featured_rank ?? 0,
       has_variants: product.has_variants,
       sku: product.sku ?? "",
       category_id: product.category_id,
@@ -163,7 +167,8 @@ const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZ
       seller_category: product.seller_category ?? "",
       category: product.category ?? product.category_ref?.name ?? "",
       condition: product.condition ?? "",
-      price_cents: product.price_cents ?? product.base_price_cents ?? null,
+      price_cents: product.price_cents ?? null,
+      base_price_cents: product.base_price_cents ?? null,
       qty: product.qty ?? product.base_stock ?? 0,
       tags: [],
     });
@@ -205,7 +210,26 @@ const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZ
     }
 
     if (form.price_cents != null && form.price_cents < 0) {
-      setError("El precio debe ser >= 0");
+      setError("El precio actual debe ser >= 0");
+      return;
+    }
+
+    if (form.base_price_cents != null && form.base_price_cents < 0) {
+      setError("El precio original debe ser >= 0");
+      return;
+    }
+
+    if (
+      form.base_price_cents != null &&
+      form.price_cents != null &&
+      form.price_cents > form.base_price_cents
+    ) {
+      setError("El precio actual no puede ser mayor al precio original");
+      return;
+    }
+
+    if (form.featured_rank < 0) {
+      setError("El featured rank debe ser >= 0");
       return;
     }
 
@@ -213,6 +237,9 @@ const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZ
       setError("El stock debe ser >= 0");
       return;
     }
+
+    const normalizedPrice = form.price_cents ?? null;
+    const normalizedBasePrice = form.base_price_cents ?? form.price_cents ?? null;
 
     const payload = {
       ...form,
@@ -224,10 +251,11 @@ const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZ
       seller_category: form.seller_category || null,
       category: form.category || null,
       condition: form.condition || null,
-      price_cents: form.price_cents ?? null,
+      price_cents: normalizedPrice,
+      base_price_cents: normalizedBasePrice,
       qty: form.qty,
-      base_price_cents: form.price_cents ?? null,
       base_stock: form.qty,
+      featured_rank: form.featured ? form.featured_rank : 0,
     };
 
     const endpoint = editingId ? `/api/admin/products/${editingId}` : "/api/admin/products";
@@ -426,9 +454,34 @@ const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZ
         <input
           type="number"
           className="rounded-md border border-uiBorder p-2.5"
+          placeholder="Compare price (cents)"
+          value={form.base_price_cents ?? ""}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              base_price_cents: e.target.value === "" ? null : Number(e.target.value),
+            }))
+          }
+        />
+        <input
+          type="number"
+          className="rounded-md border border-uiBorder p-2.5"
           placeholder="Qty"
           value={form.qty}
           onChange={(e) => setForm((f) => ({ ...f, qty: Number(e.target.value) }))}
+        />
+        <input
+          type="number"
+          min={0}
+          className="rounded-md border border-uiBorder p-2.5"
+          placeholder="Featured rank"
+          value={form.featured_rank}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              featured_rank: e.target.value === "" ? 0 : Number(e.target.value),
+            }))
+          }
         />
 
         <div className="md:col-span-2 rounded-md border border-uiBorder p-3">
@@ -459,11 +512,22 @@ const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZ
         </div>
 
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} /> Activo
+          <input
+            type="checkbox"
+            checked={form.active}
+            onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))}
+          />{" "}
+          Activo
         </label>
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={form.featured} onChange={(e) => setForm((f) => ({ ...f, featured: e.target.checked }))} /> Featured
+          <input
+            type="checkbox"
+            checked={form.featured}
+            onChange={(e) => setForm((f) => ({ ...f, featured: e.target.checked }))}
+          />{" "}
+          Featured
         </label>
+
         <div className="md:col-span-2 flex items-center gap-2">
           <button className="btn-primary" type="submit">
             {editingId ? "Guardar cambios" : "Crear producto"}
@@ -521,17 +585,17 @@ const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZ
             placeholder="Buscar por item#, nombre, descripción o category"
             value={query}
             onChange={(e) => {
-            setQuery(e.target.value);
-            setCurrentPage(1);
+              setQuery(e.target.value);
+              setCurrentPage(1);
             }}
           />
           <select
             className="rounded-md border border-uiBorder p-2 text-sm"
             value={activeFilter}
             onChange={(e) => {
-            setActiveFilter(e.target.value as "all" | "active" | "inactive" | "featured");
-            setCurrentPage(1);
-           }}
+              setActiveFilter(e.target.value as "all" | "active" | "inactive" | "featured");
+              setCurrentPage(1);
+            }}
           >
             <option value="all">Todos</option>
             <option value="active">Activos</option>
@@ -594,23 +658,23 @@ const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZ
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                      p.active
-                      ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                      : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                        p.active
+                          ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                          : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
                       }`}
-                      >
+                    >
                       {p.active ? "Activo" : "Inactivo"}
                     </span>
                   </td>
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                      p.featured
-                      ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-                      : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
-                    }`}
+                        p.featured
+                          ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                          : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                      }`}
                     >
-                    {p.featured ? "Featured" : "Normal"}
+                      {p.featured ? "Featured" : "Normal"}
                     </span>
                   </td>
                   <td className="px-4 py-3">
@@ -620,14 +684,14 @@ const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZ
                         type="button"
                         onClick={() => startEdit(p)}
                       >
-                      Editar
+                        Editar
                       </button>
                       <button
-                      className="inline-flex items-center rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-700 shadow-sm transition hover:bg-red-50"
-                      type="button"
-                      onClick={() => removeProduct(p.id)}
+                        className="inline-flex items-center rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-700 shadow-sm transition hover:bg-red-50"
+                        type="button"
+                        onClick={() => removeProduct(p.id)}
                       >
-                      Eliminar
+                        Eliminar
                       </button>
                     </div>
                   </td>
@@ -639,32 +703,32 @@ const rangeEnd = filtered.length === 0 ? 0 : Math.min(safeCurrentPage * PAGE_SIZ
       </div>
 
       {filtered.length > PAGE_SIZE ? (
-  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-    <p className="text-sm text-mutedText">
-      Página {safeCurrentPage} de {totalPages}
-    </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-sm text-mutedText">
+            Página {safeCurrentPage} de {totalPages}
+          </p>
 
-    <div className="flex items-center gap-2">
-      <button
-        type="button"
-        className="rounded-md border border-uiBorder px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-        onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-        disabled={safeCurrentPage === 1}
-      >
-        Anterior
-      </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-uiBorder px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              disabled={safeCurrentPage === 1}
+            >
+              Anterior
+            </button>
 
-      <button
-        type="button"
-        className="rounded-md border border-uiBorder px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-        onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
-        disabled={safeCurrentPage === totalPages}
-      >
-        Siguiente
-      </button>
-    </div>
-  </div>
-) : null}
+            <button
+              type="button"
+              className="rounded-md border border-uiBorder px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+              disabled={safeCurrentPage === totalPages}
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
