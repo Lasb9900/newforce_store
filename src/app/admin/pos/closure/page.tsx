@@ -1,4 +1,5 @@
 import { requireAdminPage } from "@/lib/auth";
+import { formatBusinessDateTime, getBusinessDateInputValue, getBusinessDayRange } from "@/lib/business-time";
 import { fetchPosSalesRange, sumPosTotals } from "@/lib/pos";
 import ClosureForm from "./closure-form";
 
@@ -12,18 +13,13 @@ export default async function AdminPosClosurePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   await requireAdminPage();
-  const params = await searchParams;
+  await searchParams;
 
-  const now = new Date();
-  const sevenDaysAgo = new Date(now);
-  sevenDaysAgo.setDate(now.getDate() - 7);
-  const defaultFrom = sevenDaysAgo.toISOString().slice(0, 10);
-  const defaultTo = now.toISOString().slice(0, 10);
-  const from = typeof params.from === "string" ? params.from : defaultFrom;
-  const to = typeof params.to === "string" ? params.to : defaultTo;
+  const businessDate = getBusinessDateInputValue();
+  const from = businessDate;
+  const to = businessDate;
 
-  const fromIso = new Date(`${from}T00:00:00.000Z`).toISOString();
-  const toIso = new Date(`${to}T23:59:59.999Z`).toISOString();
+  const { fromIso, toIso } = getBusinessDayRange(businessDate);
 
   const { data, error } = await fetchPosSalesRange(fromIso, toIso, undefined, undefined, undefined, true);
   const sales = data ?? [];
@@ -34,9 +30,11 @@ export default async function AdminPosClosurePage({
       <h1 className="text-2xl font-bold">Cierre de caja POS</h1>
 
       <form className="grid gap-2 rounded-xl border border-uiBorder bg-surface p-4 md:grid-cols-3">
-        <input type="date" name="from" defaultValue={from} className="rounded border border-uiBorder p-2" />
-        <input type="date" name="to" defaultValue={to} className="rounded border border-uiBorder p-2" />
-        <button type="submit" className="btn-primary">Actualizar período</button>
+        <input type="date" name="from" value={from} readOnly className="rounded border border-uiBorder p-2 bg-surfaceMuted" />
+        <input type="date" name="to" value={to} readOnly className="rounded border border-uiBorder p-2 bg-surfaceMuted" />
+        <button type="button" className="btn-primary opacity-70 cursor-not-allowed" disabled>
+          Cierre diario
+        </button>
       </form>
 
       <div className="grid gap-3 md:grid-cols-4">
@@ -47,14 +45,28 @@ export default async function AdminPosClosurePage({
       </div>
 
       {error ? <p className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">Error cargando ventas POS: {error.message}</p> : null}
-      {!sales.length ? <p className="rounded border border-uiBorder bg-surface p-4 text-sm">Sin ventas para el período seleccionado.</p> : null}
+      {!sales.length ? <p className="rounded border border-uiBorder bg-surface p-4 text-sm">Sin ventas para el cierre diario de hoy.</p> : null}
       {sales.length ? (
         <div className="overflow-x-auto rounded-xl border border-uiBorder bg-surface">
           <table className="min-w-full text-sm">
-            <thead className="bg-surfaceMuted text-left"><tr><th className="p-2">Fecha</th><th className="p-2">Producto</th><th className="p-2">Método</th><th className="p-2">Referencia</th><th className="p-2">Total</th></tr></thead>
+            <thead className="bg-surfaceMuted text-left">
+              <tr>
+                <th className="p-2">Fecha</th>
+                <th className="p-2">Producto</th>
+                <th className="p-2">Método</th>
+                <th className="p-2">Referencia</th>
+                <th className="p-2">Total</th>
+              </tr>
+            </thead>
             <tbody>
               {sales.map((s) => (
-                <tr key={`${s.sale_id}-${s.created_at}`} className="border-t border-uiBorder"><td className="p-2">{new Date(s.created_at).toLocaleString()}</td><td className="p-2">{s.product_name}</td><td className="p-2">{s.payment_method}</td><td className="p-2">{s.payment_reference ?? "—"}</td><td className="p-2">{toMoney(s.total_cents)}</td></tr>
+                <tr key={`${s.sale_id}-${s.created_at}`} className="border-t border-uiBorder">
+                  <td className="p-2">{formatBusinessDateTime(s.created_at)}</td>
+                  <td className="p-2">{s.product_name}</td>
+                  <td className="p-2">{s.payment_method}</td>
+                  <td className="p-2">{s.payment_reference ?? "—"}</td>
+                  <td className="p-2">{toMoney(s.total_cents)}</td>
+                </tr>
               ))}
             </tbody>
           </table>
