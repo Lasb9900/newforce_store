@@ -8,7 +8,7 @@ import { AuthDebugPanel } from "@/components/nav/AuthDebugPanel";
 import { SiteFooter } from "@/components/SiteFooter";
 
 export const metadata: Metadata = {
-  title: "Newforce Store | Retail Electronics & Home",
+  title: "Liquidation Plus | Retail Electronics & Home",
   description: "Shop premium home and tech products with trusted shipping, secure checkout and personalized support.",
 };
 
@@ -30,18 +30,22 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           <header className="sticky top-0 z-40 border-b border-uiBorder bg-white/95 backdrop-blur">
             <nav className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-4 py-3 text-sm md:flex-nowrap md:gap-4">
               <Link
-                href="/"
-                className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-              >
-                <Image
-                  src="/brand/cta-logo.svg"
-                  alt="Newforce Store"
-                  width={208}
-                  height={42}
-                  priority
-                  className="h-10 w-auto"
-                />
-              </Link>
+  href="/"
+  className="flex items-center gap-3 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
+>
+  <Image
+    src="/brand/logo-icono.png"
+    alt="Liquidation Plus"
+    width={40}
+    height={40}
+    priority
+    className="h-10 w-10 object-contain"
+  />
+  <div className="hidden sm:flex flex-col leading-tight">
+    <span className="text-base font-semibold text-brand-ink">Liquidation Plus</span>
+    <span className="text-xs text-slate-500">Premium liquidation</span>
+  </div>
+            </Link>
 
               <form action="/shop" className="order-3 w-full md:order-none md:flex-1">
                 <input

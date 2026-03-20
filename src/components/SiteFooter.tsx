@@ -95,7 +95,7 @@ export function SiteFooter() {
                 Liquidation Plus
               </span>
               <span className="text-sm text-white/70">
-                Premium liquidation marketplace
+                Premium liquidation
               </span>
             </div>
           </div>
