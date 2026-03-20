@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { redeemPointsSchema } from "@/lib/schemas";
 import { requireUserApi } from "@/lib/auth";
 import { getServiceSupabase } from "@/lib/supabase";
+import { sendOrderConfirmationEmailIfNeeded } from "@/lib/email";
 
 export async function POST(req: Request) {
   const auth = await requireUserApi();
@@ -57,7 +58,6 @@ export async function POST(req: Request) {
 
   let availablePoints = Number(customerPoints?.balance ?? 0);
 
-  // Solo inicializar desde loyalty_transactions si aún no existe fila en customer_points
   if (!customerPoints) {
     const { data: loyaltyTx, error: loyaltyError } = await admin
       .from("loyalty_transactions")
@@ -184,7 +184,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: redeemError.message }, { status: 400 });
   }
 
-  // Balance final correcto basado en el saldo real previo
   const newBalance = Math.max(0, availablePoints - totalPoints);
 
   const { error: syncError } = await admin.from("customer_points").upsert(
@@ -197,6 +196,15 @@ export async function POST(req: Request) {
 
   if (syncError) {
     return NextResponse.json({ error: syncError.message }, { status: 400 });
+  }
+
+  try {
+    await sendOrderConfirmationEmailIfNeeded(order.id);
+  } catch (error) {
+    console.error("[POINTS_REDEEM][ORDER_CONFIRMATION_EMAIL_ERROR]", {
+      orderId: order.id,
+      error,
+    });
   }
 
   return NextResponse.json({

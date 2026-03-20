@@ -4,16 +4,13 @@ import { stripe } from "@/lib/stripe";
 import { env } from "@/lib/env";
 import { getServiceSupabase } from "@/lib/supabase";
 import { processLoyaltyAccrual } from "@/lib/services/loyalty.service";
+import { sendOrderConfirmationEmailIfNeeded } from "@/lib/email";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function getPaymentIntentId(
-  session: Stripe.Checkout.Session
-): string | null {
-  return typeof session.payment_intent === "string"
-    ? session.payment_intent
-    : null;
+function getPaymentIntentId(session: Stripe.Checkout.Session): string | null {
+  return typeof session.payment_intent === "string" ? session.payment_intent : null;
 }
 
 type CheckoutSessionWithShipping = Stripe.Checkout.Session & {
@@ -164,6 +161,15 @@ export async function POST(req: Request) {
     }
 
     if (order.status === "paid" && order.payment_status === "paid") {
+      try {
+        await sendOrderConfirmationEmailIfNeeded(order.id);
+      } catch (error) {
+        console.error("[STRIPE_WEBHOOK][ORDER_CONFIRMATION_EMAIL_RECOVERY_ERROR]", {
+          orderId: order.id,
+          error,
+        });
+      }
+
       return NextResponse.json({ received: true, idempotent: true });
     }
 
@@ -243,7 +249,7 @@ export async function POST(req: Request) {
         stripe_payment_intent_id: getPaymentIntentId(session),
         payment_status: session.payment_status,
         shipping_details: safeSession.shipping_details ?? null,
-customer_details: safeSession.customer_details ?? null,
+        customer_details: safeSession.customer_details ?? null,
       },
     });
 
@@ -278,6 +284,15 @@ customer_details: safeSession.customer_details ?? null,
       });
     } catch (error) {
       console.error("[STRIPE_WEBHOOK][LOYALTY_ERROR]", error);
+    }
+
+    try {
+      await sendOrderConfirmationEmailIfNeeded(order.id);
+    } catch (error) {
+      console.error("[STRIPE_WEBHOOK][ORDER_CONFIRMATION_EMAIL_ERROR]", {
+        orderId: order.id,
+        error,
+      });
     }
 
     return NextResponse.json({ received: true });
