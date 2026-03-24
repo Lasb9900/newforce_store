@@ -40,11 +40,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Producto no redimible" }, { status: 400 });
   }
 
-  if (product.base_stock < parsed.data.qty) {
+  const currentStock = Number(product.base_stock ?? 0);
+
+  if (currentStock < parsed.data.qty) {
     return NextResponse.json({ error: "Sin stock" }, { status: 400 });
   }
 
-  const totalPoints = product.points_price * parsed.data.qty;
+  const totalPoints = Number(product.points_price) * Number(parsed.data.qty);
 
   const { data: customerPoints, error: pointsError } = await admin
     .from("customer_points")
@@ -143,15 +145,19 @@ export async function POST(req: Request) {
     );
   }
 
-  const { error: stockError } = await admin
-    .from("products")
-    .update({ base_stock: product.base_stock - parsed.data.qty })
-    .eq("id", product.id)
-    .gte("base_stock", parsed.data.qty);
+  const nextStock = currentStock - parsed.data.qty;
 
-  if (stockError) {
+  const { data: updatedProduct, error: stockError } = await admin
+    .from("products")
+    .update({ base_stock: nextStock })
+    .eq("id", product.id)
+    .gte("base_stock", parsed.data.qty)
+    .select("id")
+    .maybeSingle();
+
+  if (stockError || !updatedProduct) {
     await admin.from("orders").delete().eq("id", order.id);
-    return NextResponse.json({ error: stockError.message }, { status: 400 });
+    return NextResponse.json({ error: stockError?.message || "Sin stock" }, { status: 400 });
   }
 
   const { error: itemError } = await admin.from("order_items").insert({
@@ -164,7 +170,7 @@ export async function POST(req: Request) {
   });
 
   if (itemError) {
-    await admin.from("products").update({ base_stock: product.base_stock }).eq("id", product.id);
+    await admin.from("products").update({ base_stock: currentStock }).eq("id", product.id);
     await admin.from("orders").delete().eq("id", order.id);
     return NextResponse.json({ error: itemError.message }, { status: 400 });
   }
@@ -179,7 +185,7 @@ export async function POST(req: Request) {
 
   if (redeemError) {
     await admin.from("order_items").delete().eq("order_id", order.id);
-    await admin.from("products").update({ base_stock: product.base_stock }).eq("id", product.id);
+    await admin.from("products").update({ base_stock: currentStock }).eq("id", product.id);
     await admin.from("orders").delete().eq("id", order.id);
     return NextResponse.json({ error: redeemError.message }, { status: 400 });
   }
