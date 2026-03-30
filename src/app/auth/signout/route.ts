@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getServerSupabase } from "@/lib/supabase";
+import { env } from "@/lib/env";
 
-function buildRedirectUrl(request: NextRequest) {
-  const url = new URL("/login", request.url);
+function buildRedirectUrl() {
+  const url = new URL("/login", env.NEXT_PUBLIC_SITE_URL);
   url.searchParams.set("signedOut", "1");
   return url;
 }
@@ -30,10 +31,9 @@ async function clearSupabaseCookies() {
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(_: NextRequest) {
   try {
     const supabase = await getServerSupabase();
-
     const { error } = await supabase.auth.signOut();
 
     if (error) {
@@ -47,10 +47,10 @@ export async function POST(request: NextRequest) {
 
   await clearSupabaseCookies();
 
-  return NextResponse.redirect(buildRedirectUrl(request), 303);
+  return NextResponse.redirect(buildRedirectUrl(), 303);
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(_: NextRequest) {
   await clearSupabaseCookies();
-  return NextResponse.redirect(buildRedirectUrl(request), 303);
+  return NextResponse.redirect(buildRedirectUrl(), 303);
 }

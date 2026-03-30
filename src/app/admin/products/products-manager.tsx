@@ -242,6 +242,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     setExistingImages(uploadedImages);
     setImageFiles([]);
     setImagePreviews([]);
+    await refreshProducts();
   }
 
   async function removeExistingImage(imageId: string) {
@@ -257,6 +258,70 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     const remainingImages = Array.isArray(json.data?.images) ? json.data.images : [];
     setExistingImages(remainingImages);
     await refreshProducts();
+  }
+
+  async function reorderExistingImages(
+    nextImages: Array<{ id: string; url: string; sort_order: number }>
+  ) {
+    if (!editingId) return;
+
+    const normalized = nextImages.map((img, index) => ({
+      ...img,
+      sort_order: index,
+    }));
+
+    const response = await fetch(`/api/admin/products/${editingId}/images`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        images: normalized.map((img) => ({ id: img.id })),
+      }),
+    });
+
+    const json = await response.json();
+    if (!response.ok) {
+      throw new Error(json.error || "No se pudo reordenar la galería");
+    }
+
+    const updatedImages = Array.isArray(json.data?.images) ? json.data.images : [];
+    setExistingImages(updatedImages);
+    await refreshProducts();
+  }
+
+  async function moveImageLeft(imageId: string) {
+    const currentIndex = existingImages.findIndex((img) => img.id === imageId);
+    if (currentIndex <= 0) return;
+
+    const nextImages = [...existingImages];
+    [nextImages[currentIndex - 1], nextImages[currentIndex]] = [
+      nextImages[currentIndex],
+      nextImages[currentIndex - 1],
+    ];
+
+    await reorderExistingImages(nextImages);
+  }
+
+  async function moveImageRight(imageId: string) {
+    const currentIndex = existingImages.findIndex((img) => img.id === imageId);
+    if (currentIndex === -1 || currentIndex >= existingImages.length - 1) return;
+
+    const nextImages = [...existingImages];
+    [nextImages[currentIndex], nextImages[currentIndex + 1]] = [
+      nextImages[currentIndex + 1],
+      nextImages[currentIndex],
+    ];
+
+    await reorderExistingImages(nextImages);
+  }
+
+  async function makeImageCover(imageId: string) {
+    const currentIndex = existingImages.findIndex((img) => img.id === imageId);
+    if (currentIndex <= 0) return;
+
+    const selected = existingImages[currentIndex];
+    const rest = existingImages.filter((img) => img.id !== imageId);
+
+    await reorderExistingImages([selected, ...rest]);
   }
 
   async function saveProduct(e: React.FormEvent) {
@@ -651,22 +716,73 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
                         alt={`Imagen ${index + 1}`}
                         className="h-28 w-full object-cover"
                       />
-                      <div className="flex items-center justify-between gap-2 p-2">
-                        <span className="text-[11px] text-mutedText">
-                          {index === 0 ? "Portada" : `Imagen ${index + 1}`}
-                        </span>
+
+                      <div className="space-y-2 p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-mutedText">
+                            {index === 0 ? "Portada" : `Imagen ${index + 1}`}
+                          </span>
+
+                          <button
+                            type="button"
+                            className="text-[11px] font-medium text-red-600 hover:underline"
+                            onClick={async () => {
+                              try {
+                                await removeExistingImage(image.id);
+                              } catch (err) {
+                                setError((err as Error).message);
+                              }
+                            }}
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={index === 0}
+                            className="rounded border border-uiBorder px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={async () => {
+                              try {
+                                await moveImageLeft(image.id);
+                              } catch (err) {
+                                setError((err as Error).message);
+                              }
+                            }}
+                          >
+                            ← Izq
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={index === existingImages.length - 1}
+                            className="rounded border border-uiBorder px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={async () => {
+                              try {
+                                await moveImageRight(image.id);
+                              } catch (err) {
+                                setError((err as Error).message);
+                              }
+                            }}
+                          >
+                            Der →
+                          </button>
+                        </div>
+
                         <button
                           type="button"
-                          className="text-[11px] font-medium text-red-600 hover:underline"
+                          disabled={index === 0}
+                          className="w-full rounded border border-uiBorder px-2 py-1 text-[11px] font-medium hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
                           onClick={async () => {
                             try {
-                              await removeExistingImage(image.id);
+                              await makeImageCover(image.id);
                             } catch (err) {
                               setError((err as Error).message);
                             }
                           }}
                         >
-                          Eliminar
+                          {index === 0 ? "Portada actual" : "Usar como portada"}
                         </button>
                       </div>
                     </div>
