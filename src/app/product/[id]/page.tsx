@@ -1,12 +1,11 @@
-import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AddToCart } from "./add-to-cart";
 import ProductReviewForm from "./product-review-form";
+import ProductGallery from "./product-gallery";
 import { PriceDisplay } from "@/components/PriceDisplay";
 import { StockBadge } from "@/components/StockBadge";
 import { ProductCard } from "@/components/ProductCard";
-import { ProductImage } from "@/components/ProductImage";
 import { getServerSupabase } from "@/lib/supabase";
 import {
   getCompareAtPriceCents,
@@ -142,6 +141,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   const images = (product.images ?? []).sort(
     (a: { sort_order: number }, b: { sort_order: number }) => a.sort_order - b.sort_order
   );
+
   const image = getPrimaryImage(product);
   const price = getDisplayPriceCents(product);
   const compareAt = getCompareAtPriceCents(product, price);
@@ -179,36 +179,11 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
       </nav>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <div className="space-y-3">
-          <div className="relative aspect-square overflow-hidden rounded-2xl border border-uiBorder bg-surface">
-            <ProductImage
-              src={image.primary}
-              alt={name}
-              fill
-              sizes="(max-width: 1024px) 100vw, 50vw"
-              priority
-              className="object-cover"
-            />
-          </div>
-
-          <div className="grid grid-cols-4 gap-3">
-            {images.slice(0, 4).map((item: { id: string; url: string }, index: number) => (
-              <div
-                key={item.id ?? index}
-                className="relative aspect-square overflow-hidden rounded-lg border border-uiBorder bg-surface"
-              >
-                <Image
-                  src={item.url}
-                  alt={`${name} ${index + 1}`}
-                  fill
-                  className="object-cover"
-                  sizes="25vw"
-                  unoptimized
-                />
-              </div>
-            ))}
-          </div>
-        </div>
+        <ProductGallery
+          name={name}
+          primaryImage={image.primary}
+          images={images}
+        />
 
         <div className="space-y-4 rounded-2xl border border-uiBorder bg-surface p-6 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-mutedText">{category}</p>

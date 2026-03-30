@@ -37,13 +37,21 @@ export async function POST(req: Request) {
       data: { user },
     } = await sb.auth.getUser();
 
-    const cartInput = user
-      ? (await loadUserCart(sb, user.id)).items.map((item) => ({
-          productId: item.productId,
-          variantId: item.variantId,
-          qty: item.qty,
-        }))
-      : parsed.data.items;
+    if (!user) {
+      return NextResponse.json(
+        {
+          error: "AUTH_REQUIRED",
+          message: "You must sign in or register to continue with checkout.",
+        },
+        { status: 401 }
+      );
+    }
+
+    const cartInput = (await loadUserCart(sb, user.id)).items.map((item) => ({
+      productId: item.productId,
+      variantId: item.variantId,
+      qty: item.qty,
+    }));
 
     const validatedCart = await validateCartItems(sb, cartInput);
 
@@ -91,7 +99,7 @@ export async function POST(req: Request) {
     const { data: order, error: orderError } = await sb
       .from("orders")
       .insert({
-        user_id: user?.id ?? null,
+        user_id: user.id,
         buyer_email: parsed.data.shipping.email,
         buyer_name: parsed.data.shipping.full_name,
         buyer_phone: parsed.data.shipping.phone,
@@ -168,7 +176,7 @@ export async function POST(req: Request) {
       `${env.NEXT_PUBLIC_SITE_URL}/cancel`;
 
     const session = await stripe.checkout.sessions.create({
-      client_reference_id: user?.id ?? undefined,
+      client_reference_id: user.id,
       mode: "payment",
       line_items: lineItems,
       customer_email: parsed.data.shipping.email,

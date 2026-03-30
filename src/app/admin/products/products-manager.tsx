@@ -34,6 +34,11 @@ type ProductRow = {
   category_id: string | null;
   category_ref?: { name?: string | null; slug?: string | null } | null;
   image_url?: string | null;
+  images?: Array<{
+    id: string;
+    url: string;
+    sort_order: number;
+  }>;
   redeemable?: boolean;
   points_price?: number | null;
 };
@@ -99,8 +104,12 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
   const [importResult, setImportResult] = useState<string | null>(null);
   const [importPreview, setImportPreview] = useState<ParsedImportRow[]>([]);
   const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [existingImages, setExistingImages] = useState<
+    Array<{ id: string; url: string; sort_order: number }>
+  >([]);
 
   const filtered = useMemo(() => {
     return products.filter((product) => {
@@ -146,12 +155,18 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     const normalized = (json.data ?? []).map(
       (
         row: ProductRow & {
-          images?: Array<{ url: string; sort_order: number }>;
+          images?: Array<{ id: string; url: string; sort_order: number }>;
         },
       ) => {
         const images = Array.isArray(row.images) ? [...row.images] : [];
-        const primary = images.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0];
-        return { ...row, image_url: primary?.url ?? row.image_url ?? null };
+        const sortedImages = images.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        const primary = sortedImages[0];
+
+        return {
+          ...row,
+          images: sortedImages,
+          image_url: primary?.url ?? row.image_url ?? null,
+        };
       },
     );
 
@@ -163,11 +178,18 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     setForm(EMPTY_FORM);
     setError(null);
     setMessage(null);
-    setImageFile(null);
-    setImagePreview(null);
+    setImageFiles([]);
+    setImagePreviews([]);
+    setExistingImages([]);
   }
 
   function startEdit(product: ProductRow) {
+    const sortedImages = Array.isArray(product.images)
+      ? [...product.images].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      : product.image_url
+        ? [{ id: `fallback-${product.id}`, url: product.image_url, sort_order: 0 }]
+        : [];
+
     setEditingId(product.id);
     setForm({
       name: product.name,
@@ -192,16 +214,19 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     });
     setMessage(null);
     setError(null);
-    setImageFile(null);
-    setImagePreview(product.image_url ?? null);
+    setImageFiles([]);
+    setImagePreviews([]);
+    setExistingImages(sortedImages);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function uploadImage(productId: string) {
-    if (!imageFile) return;
+  async function uploadImages(productId: string) {
+    if (!imageFiles.length) return;
 
     const fd = new FormData();
-    fd.append("file", imageFile);
+    for (const file of imageFiles) {
+      fd.append("files", file);
+    }
 
     const response = await fetch(`/api/admin/products/${productId}/image-upload`, {
       method: "POST",
@@ -210,11 +235,28 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
 
     const json = await response.json();
     if (!response.ok) {
-      throw new Error(json.error || "No se pudo subir imagen");
+      throw new Error(json.error || "No se pudieron subir las imágenes");
     }
 
-    setImagePreview(json.data?.url ?? null);
-    setImageFile(null);
+    const uploadedImages = Array.isArray(json.data?.images) ? json.data.images : [];
+    setExistingImages(uploadedImages);
+    setImageFiles([]);
+    setImagePreviews([]);
+  }
+
+  async function removeExistingImage(imageId: string) {
+    const response = await fetch(`/api/admin/product-images/${imageId}`, {
+      method: "DELETE",
+    });
+
+    const json = await response.json();
+    if (!response.ok) {
+      throw new Error(json.error || "No se pudo eliminar la imagen");
+    }
+
+    const remainingImages = Array.isArray(json.data?.images) ? json.data.images : [];
+    setExistingImages(remainingImages);
+    await refreshProducts();
   }
 
   async function saveProduct(e: React.FormEvent) {
@@ -306,9 +348,9 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     }
 
     const productId = json.data?.id ?? editingId;
-    if (productId && imageFile) {
+    if (productId && imageFiles.length) {
       try {
-        await uploadImage(productId);
+        await uploadImages(productId);
       } catch (uploadError) {
         setError((uploadError as Error).message);
         return;
@@ -318,7 +360,9 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     setMessage(editingId ? "Producto actualizado" : "Producto creado");
     setEditingId(null);
     setForm(EMPTY_FORM);
-    setImageFile(null);
+    setImageFiles([]);
+    setImagePreviews([]);
+    setExistingImages([]);
     await refreshProducts();
   }
 
@@ -557,34 +601,109 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         />
 
         <div className="md:col-span-2 rounded-md border border-uiBorder p-3">
-          <p className="mb-2 text-sm font-semibold">Foto del producto</p>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold">Galería del producto</p>
+              <p className="text-xs text-mutedText">
+                La primera imagen queda como portada principal del producto.
+              </p>
+            </div>
+
             <label className="cursor-pointer rounded border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted">
-              Subir imagen
+              Subir imágenes
               <input
                 type="file"
+                multiple
                 accept="image/jpeg,image/jpg,image/png,image/webp"
                 className="hidden"
                 onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  setImageFile(file);
-                  if (file) {
-                    setImagePreview(URL.createObjectURL(file));
-                  }
+                  const files = Array.from(e.target.files ?? []);
+                  setImageFiles(files);
+                  setImagePreviews(files.map((file) => URL.createObjectURL(file)));
                 }}
               />
             </label>
-            {imageFile ? <span className="text-xs text-mutedText">{imageFile.name}</span> : null}
-            {imagePreview ? (
-              <img
-                src={imagePreview}
-                alt="preview"
-                className="h-14 w-14 rounded border border-uiBorder object-cover"
-              />
-            ) : (
-              <span className="text-xs text-mutedText">Sin imagen</span>
-            )}
           </div>
+
+          {imageFiles.length ? (
+            <p className="mb-3 text-xs text-mutedText">
+              {imageFiles.length} imagen(es) seleccionada(s): {imageFiles.map((file) => file.name).join(", ")}
+            </p>
+          ) : null}
+
+          {existingImages.length > 0 ? (
+            <div className="mb-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-mutedText">
+                Imágenes guardadas
+              </p>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+                {existingImages
+                  .slice()
+                  .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+                  .map((image, index) => (
+                    <div
+                      key={image.id}
+                      className="overflow-hidden rounded-lg border border-uiBorder bg-surfaceMuted"
+                    >
+                      <img
+                        src={image.url}
+                        alt={`Imagen ${index + 1}`}
+                        className="h-28 w-full object-cover"
+                      />
+                      <div className="flex items-center justify-between gap-2 p-2">
+                        <span className="text-[11px] text-mutedText">
+                          {index === 0 ? "Portada" : `Imagen ${index + 1}`}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[11px] font-medium text-red-600 hover:underline"
+                          onClick={async () => {
+                            try {
+                              await removeExistingImage(image.id);
+                            } catch (err) {
+                              setError((err as Error).message);
+                            }
+                          }}
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ) : null}
+
+          {imagePreviews.length > 0 ? (
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-mutedText">
+                Imágenes nuevas por subir
+              </p>
+
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+                {imagePreviews.map((preview, index) => (
+                  <div
+                    key={`${preview}-${index}`}
+                    className="overflow-hidden rounded-lg border border-dashed border-uiBorder bg-surface"
+                  >
+                    <img
+                      src={preview}
+                      alt={`Nueva imagen ${index + 1}`}
+                      className="h-28 w-full object-cover"
+                    />
+                    <div className="p-2 text-[11px] text-mutedText">
+                      {index === 0 && existingImages.length === 0
+                        ? "Será la portada"
+                        : `Nueva imagen ${index + 1}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : existingImages.length === 0 ? (
+            <span className="text-xs text-mutedText">Sin imágenes</span>
+          ) : null}
         </div>
 
         <label className="flex items-center gap-2 text-sm">

@@ -10,8 +10,17 @@ import { ShippingAddressForm } from "@/components/checkout/ShippingAddressForm";
 import { ShippingMethods } from "@/components/checkout/ShippingMethods";
 import { OrderSummary } from "@/components/checkout/OrderSummary";
 import { CheckoutActions } from "@/components/checkout/CheckoutActions";
-import { FieldErrors, initialShippingForm, ShippingForm, ShippingOption } from "@/components/checkout/types";
-import { createStripeCheckoutRequest, getShippingRatesRequest, validateCartRequest } from "@/lib/checkout-client";
+import {
+  FieldErrors,
+  initialShippingForm,
+  ShippingForm,
+  ShippingOption,
+} from "@/components/checkout/types";
+import {
+  createStripeCheckoutRequest,
+  getShippingRatesRequest,
+  validateCartRequest,
+} from "@/lib/checkout-client";
 
 const SHIPPING_STORAGE_KEY = "nf_checkout_shipping";
 
@@ -176,7 +185,11 @@ export default function CartPage() {
       setShippingOptions(rates.shipping_options ?? []);
       setSelectedShippingId(rates.shipping_options?.[0]?.id ?? "");
       setShippingSource(rates.source ?? null);
-      setShippingMessage(rates.source === "UPS_MOCK" ? "Showing fallback shipping rates while live carrier rates are unavailable." : null);
+      setShippingMessage(
+        rates.source === "UPS_MOCK"
+          ? "Showing fallback shipping rates while live carrier rates are unavailable."
+          : null,
+      );
     } catch {
       setShippingMessage("We couldn't calculate shipping rates right now. Please review your address and retry.");
     } finally {
@@ -205,14 +218,37 @@ export default function CartPage() {
     try {
       const cart = await validateCartRequest(itemPayload);
       setSubtotalCents(cart.subtotal_cents ?? 0);
+
       const { url } = await createStripeCheckoutRequest({
         items: itemPayload,
         shipping: sanitized,
         shipping_option_id: selectedShipping.id,
       });
-      if (url) window.location.href = url;
-    } catch {
+
+      if (url) {
+        window.location.href = url;
+        return;
+      }
+
       setFormMessage("Unable to continue to payment. Please try again.");
+      setLoadingCheckout(false);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Unable to continue to payment. Please try again.";
+
+      setFormMessage(message);
+
+      if (
+        message === "You must sign in or register to continue with checkout." ||
+        message === "AUTH_REQUIRED"
+      ) {
+        window.setTimeout(() => {
+          window.location.href = "/login?next=/cart";
+        }, 1500);
+      }
+
       setLoadingCheckout(false);
     }
   }
@@ -234,20 +270,53 @@ export default function CartPage() {
       <CheckoutHeader />
       <CheckoutTrustBadges />
 
-      {notice ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">{notice.message}<button className="ml-3 underline" onClick={dismissNotice}>Dismiss</button></div> : null}
-      {formMessage ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{formMessage}</div> : null}
+      {notice ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+          {notice.message}
+          <button className="ml-3 underline" onClick={dismissNotice}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
+      {formMessage ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {formMessage}
+        </div>
+      ) : null}
 
       <div className="space-y-2 lg:hidden">
-        <button type="button" className="w-full rounded-xl border border-uiBorder bg-white px-4 py-3 text-left text-sm font-medium" onClick={() => setSummaryOpenMobile((prev) => !prev)}>
+        <button
+          type="button"
+          className="w-full rounded-xl border border-uiBorder bg-white px-4 py-3 text-left text-sm font-medium"
+          onClick={() => setSummaryOpenMobile((prev) => !prev)}
+        >
           {summaryOpenMobile ? "Hide order summary" : "Show order summary"}
         </button>
-        {summaryOpenMobile ? <OrderSummary items={items} subtotal={subtotalCents} shipping={shippingCents} tax={taxCents} loading={!initialized || syncing || loadingSummary || loadingRates} /> : null}
+        {summaryOpenMobile ? (
+          <OrderSummary
+            items={items}
+            subtotal={subtotalCents}
+            shipping={shippingCents}
+            tax={taxCents}
+            loading={!initialized || syncing || loadingSummary || loadingRates}
+          />
+        ) : null}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
         <div className="space-y-4">
-          <CheckoutCartItems items={items} onQty={(itemKey, qty) => void updateQty(itemKey, qty)} onRemove={(itemKey) => void remove(itemKey)} disabled={syncing || !initialized} />
-          <ShippingAddressForm value={shipping} errors={errors} onChange={(patch) => setShipping((prev) => ({ ...prev, ...patch }))} />
+          <CheckoutCartItems
+            items={items}
+            onQty={(itemKey, qty) => void updateQty(itemKey, qty)}
+            onRemove={(itemKey) => void remove(itemKey)}
+            disabled={syncing || !initialized}
+          />
+          <ShippingAddressForm
+            value={shipping}
+            errors={errors}
+            onChange={(patch) => setShipping((prev) => ({ ...prev, ...patch }))}
+          />
           <ShippingMethods
             options={shippingOptions}
             selectedId={selectedShippingId}
@@ -259,12 +328,23 @@ export default function CartPage() {
           />
           <section className="rounded-2xl border border-uiBorder bg-surface p-4 shadow-sm">
             <h2 className="mb-2 text-lg font-semibold">5. Payment</h2>
-            <CheckoutActions disabled={!canCheckout} loading={loadingCheckout || syncing || !initialized} missingShipping={!selectedShipping} onCheckout={handleCheckout} />
+            <CheckoutActions
+              disabled={!canCheckout}
+              loading={loadingCheckout || syncing || !initialized}
+              missingShipping={!selectedShipping}
+              onCheckout={handleCheckout}
+            />
           </section>
         </div>
 
         <div className="hidden lg:block lg:sticky lg:top-4 lg:self-start">
-          <OrderSummary items={items} subtotal={subtotalCents} shipping={shippingCents} tax={taxCents} loading={!initialized || syncing || loadingSummary || loadingRates} />
+          <OrderSummary
+            items={items}
+            subtotal={subtotalCents}
+            shipping={shippingCents}
+            tax={taxCents}
+            loading={!initialized || syncing || loadingSummary || loadingRates}
+          />
         </div>
       </div>
     </div>
