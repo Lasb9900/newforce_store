@@ -11,6 +11,7 @@ type ParsedImportRow = {
   sellerCategory: string;
   category: string;
   condition: string;
+  unitRetail?: number | null;
 };
 
 type ProductRow = {
@@ -88,6 +89,16 @@ const EMPTY_FORM: ProductForm = {
 };
 
 const PAGE_SIZE = 10;
+
+function centsToDisplayAmount(value: number | null | undefined) {
+  if (value == null) return null;
+  return Number((value / 100).toFixed(2));
+}
+
+function displayAmountToCents(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) return null;
+  return Math.round(value * 100);
+}
 
 export default function ProductsManager({ initialProducts }: { initialProducts: ProductRow[] }) {
   const [products, setProducts] = useState<ProductRow[]>(initialProducts ?? []);
@@ -205,8 +216,8 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       seller_category: product.seller_category ?? "",
       category: product.category ?? product.category_ref?.name ?? "",
       condition: product.condition ?? "",
-      price_cents: product.price_cents ?? null,
-      base_price_cents: product.base_price_cents ?? null,
+      price_cents: centsToDisplayAmount(product.price_cents),
+      base_price_cents: centsToDisplayAmount(product.base_price_cents),
       qty: product.qty ?? product.base_stock ?? 0,
       tags: [],
       redeemable: Boolean(product.redeemable),
@@ -368,8 +379,10 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       return;
     }
 
-    const normalizedPrice = form.price_cents ?? null;
-    const normalizedBasePrice = form.base_price_cents ?? form.price_cents ?? null;
+    const normalizedPrice = displayAmountToCents(form.price_cents);
+    const normalizedBasePrice = displayAmountToCents(
+      form.base_price_cents ?? form.price_cents
+    );
 
     const payload = {
       ...form,
@@ -530,8 +543,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         className="flex flex-wrap items-center gap-2 rounded-xl border border-uiBorder bg-surface p-3"
       >
         <p className="text-sm text-mutedText">
-          Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition
-        </p>
+          Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition, Unit Retail        </p>
         <button
           type="submit"
           className="rounded-md border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted"
@@ -595,17 +607,24 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         />
         <input
           type="number"
+          step="0.01"
+          min="0"
           className="rounded-md border border-uiBorder p-2.5"
-          placeholder="Price (cents)"
+          placeholder="Precio en USD"
           value={form.price_cents ?? ""}
           onChange={(e) =>
-            setForm((f) => ({ ...f, price_cents: e.target.value === "" ? null : Number(e.target.value) }))
+            setForm((f) => ({
+              ...f,
+              price_cents: e.target.value === "" ? null : Number(e.target.value),
+            }))
           }
         />
         <input
           type="number"
+          step="0.01"
+          min="0"
           className="rounded-md border border-uiBorder p-2.5"
-          placeholder="Compare price (cents)"
+          placeholder="Precio original en USD"
           value={form.base_price_cents ?? ""}
           onChange={(e) =>
             setForm((f) => ({
@@ -874,6 +893,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
                   <th className="px-2 py-1">Seller Category</th>
                   <th className="px-2 py-1">Category</th>
                   <th className="px-2 py-1">Condition</th>
+                  <th className="px-2 py-1">Unit Retail</th>
                 </tr>
               </thead>
               <tbody>
@@ -886,6 +906,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
                     <td className="px-2 py-1">{String(row.sellerCategory ?? "")}</td>
                     <td className="px-2 py-1">{String(row.category ?? "")}</td>
                     <td className="px-2 py-1">{String(row.condition ?? "")}</td>
+                    <td className="px-2 py-1">{String(row.unitRetail ?? "")}</td>
                   </tr>
                 ))}
               </tbody>

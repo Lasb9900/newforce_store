@@ -1,7 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireOwnerApi } from "@/lib/auth";
 
-const REQUIRED_HEADERS = ["item #", "department", "item description", "qty", "seller category", "category", "condition"] as const;
+const REQUIRED_HEADERS = [
+  "item #",
+  "department",
+  "item description",
+  "qty",
+  "seller category",
+  "category",
+  "condition",
+  "unit retail",
+] as const;
 
 type ParsedInventoryRow = {
   itemNumber: string;
@@ -11,10 +20,21 @@ type ParsedInventoryRow = {
   sellerCategory: string;
   category: string;
   condition: string;
+  unitRetail: number | null;
 };
 
 function normalizeHeader(header: string) {
   return header.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function parseUnitRetail(value: string | undefined) {
+  if (!value) return null;
+
+  const normalized = value.replace(/[$,\s]/g, "").trim();
+  if (!normalized) return null;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parseCsvLine(line: string) {
@@ -26,86 +46,26 @@ function parseCsvLine(line: string) {
     const char = line[i];
 
     if (char === '"') {
-      const next = line[i + 1];
-      if (inQuotes && next === '"') {
+      if (inQuotes && line[i + 1] === '"') {
         current += '"';
         i += 1;
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (char === "," && !inQuotes) {
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
       values.push(current.trim());
       current = "";
-    } else {
-      current += char;
+      continue;
     }
+
+    current += char;
   }
 
   values.push(current.trim());
   return values;
-}
-
-function parseInventoryCsv(content: string) {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  if (!lines.length) {
-    throw new Error("CSV vacío");
-  }
-
-  const headersRaw = parseCsvLine(lines[0]);
-  const normalizedHeaders = headersRaw.map(normalizeHeader);
-
-  for (const required of REQUIRED_HEADERS) {
-    if (!normalizedHeaders.includes(required)) {
-      throw new Error(`Falta columna obligatoria: ${required}`);
-    }
-  }
-
-  const headerIndex = (name: string) => normalizedHeaders.indexOf(name);
-
-  const rows: Array<{ line: number; data: ParsedInventoryRow }> = [];
-  const errors: string[] = [];
-
-  for (let i = 1; i < lines.length; i += 1) {
-    const values = parseCsvLine(lines[i]);
-
-    const itemNumber = values[headerIndex("item #")]?.trim() ?? "";
-    const department = values[headerIndex("department")]?.trim() ?? "";
-    const itemDescription = values[headerIndex("item description")]?.trim() ?? "";
-    const qtyRaw = values[headerIndex("qty")]?.trim() ?? "";
-    const sellerCategory = values[headerIndex("seller category")]?.trim() ?? "";
-    const category = values[headerIndex("category")]?.trim() ?? "";
-    const condition = values[headerIndex("condition")]?.trim() ?? "";
-
-    if (!itemNumber || !itemDescription || !qtyRaw || !category) {
-      errors.push(`Línea ${i + 1}: faltan campos mínimos (Item #, Item Description, Qty, Category)`);
-      continue;
-    }
-
-    const qty = Number(qtyRaw);
-    if (Number.isNaN(qty)) {
-      errors.push(`Línea ${i + 1}: Qty inválido`);
-      continue;
-    }
-
-    rows.push({
-      line: i + 1,
-      data: {
-        itemNumber,
-        department,
-        itemDescription,
-        qty,
-        sellerCategory,
-        category,
-        condition,
-      },
-    });
-  }
-
-  return { headersRaw, rows, errors };
 }
 
 export async function POST(req: Request) {
@@ -116,29 +76,92 @@ export async function POST(req: Request) {
   const file = formData.get("file");
 
   if (!(file instanceof File)) {
-    return NextResponse.json({ error: "Debes adjuntar un archivo CSV" }, { status: 400 });
+    return NextResponse.json({ error: "Debes seleccionar un archivo CSV" }, { status: 400 });
   }
 
-  const text = await file.text();
+  const raw = await file.text();
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 
-  try {
-    const parsed = parseInventoryCsv(text);
+  if (lines.length < 2) {
+    return NextResponse.json({ error: "El CSV no tiene suficientes filas" }, { status: 400 });
+  }
 
-    return NextResponse.json({
-      data: {
-        mode: "parse_only",
-        expectedColumns: ["Item #", "Department", "Item Description", "Qty", "Seller Category", "Category", "Condition"],
-        sourceHeaders: parsed.headersRaw,
-        summary: {
-          parsedRows: parsed.rows.length,
-          failedRows: parsed.errors.length,
-          totalRows: parsed.rows.length + parsed.errors.length,
-        },
-        preview: parsed.rows.slice(0, 20).map((row) => ({ line: row.line, ...row.data })),
-        errors: parsed.errors.slice(0, 30),
+  const headerValues = parseCsvLine(lines[0]).map(normalizeHeader);
+
+  const missingHeaders = REQUIRED_HEADERS.filter((header) => !headerValues.includes(header));
+  if (missingHeaders.length) {
+    return NextResponse.json(
+      {
+        error: `Faltan columnas requeridas: ${missingHeaders.join(", ")}`,
       },
-    });
-  } catch (error) {
-    return NextResponse.json({ error: (error as Error).message }, { status: 400 });
+      { status: 400 },
+    );
   }
+
+  const preview: ParsedInventoryRow[] = [];
+  const errors: string[] = [];
+
+  for (let index = 1; index < lines.length; index += 1) {
+    const rowValues = parseCsvLine(lines[index]);
+
+    if (rowValues.every((value) => !String(value ?? "").trim())) {
+      continue;
+    }
+
+    const row: Record<string, string> = {};
+    for (let col = 0; col < headerValues.length; col += 1) {
+      row[headerValues[col]] = rowValues[col] ?? "";
+    }
+
+    const itemNumber = row["item #"]?.trim() ?? "";
+    const department = row["department"]?.trim() ?? "";
+    const itemDescription = row["item description"]?.trim() ?? "";
+    const qtyRaw = row["qty"]?.trim() ?? "";
+    const sellerCategory = row["seller category"]?.trim() ?? "";
+    const category = row["category"]?.trim() ?? "";
+    const condition = row["condition"]?.trim() ?? "";
+    const unitRetail = parseUnitRetail(row["unit retail"]);
+
+    const qty = Number(qtyRaw);
+
+    const rowErrors: string[] = [];
+    if (!itemNumber) rowErrors.push("Item # vacío");
+    if (!department) rowErrors.push("Department vacío");
+    if (!itemDescription) rowErrors.push("Item Description vacío");
+    if (!qtyRaw || !Number.isFinite(qty) || qty < 0) rowErrors.push("Qty inválido");
+    if (!sellerCategory) rowErrors.push("Seller Category vacío");
+    if (!category) rowErrors.push("Category vacío");
+    if (!condition) rowErrors.push("Condition vacío");
+
+    if (rowErrors.length) {
+      errors.push(`Fila ${index + 1}: ${rowErrors.join(" | ")}`);
+      continue;
+    }
+
+    preview.push({
+      itemNumber,
+      department,
+      itemDescription,
+      qty,
+      sellerCategory,
+      category,
+      condition,
+      unitRetail,
+    });
+  }
+
+  return NextResponse.json({
+    data: {
+      preview: preview.slice(0, 20),
+      parsedRows: preview,
+      summary: {
+        parsedRows: preview.length,
+        failedRows: errors.length,
+      },
+      errors,
+    },
+  });
 }
