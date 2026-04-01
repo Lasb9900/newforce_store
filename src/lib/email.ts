@@ -1,6 +1,6 @@
 import "server-only";
 
-import { env } from "@/lib/env";
+import { serverEnv } from "@/lib/server-env";
 import { getServiceSupabase } from "@/lib/supabase";
 import { formatCurrency } from "@/lib/utils";
 
@@ -354,10 +354,10 @@ async function logOrderEmailEvent(
 export async function sendOrderConfirmationEmailIfNeeded(orderId: string) {
   console.log("[EMAIL][START]", { orderId });
 
-  if (!env.RESEND_API_KEY || !env.EMAIL_FROM_ADDRESS) {
+  if (!serverEnv.RESEND_API_KEY || !serverEnv.EMAIL_FROM_ADDRESS) {
     console.warn("[EMAIL][SKIPPED_NOT_CONFIGURED]", {
-      hasApiKey: Boolean(env.RESEND_API_KEY),
-      hasFromAddress: Boolean(env.EMAIL_FROM_ADDRESS),
+      hasApiKey: Boolean(serverEnv.RESEND_API_KEY),
+      hasFromAddress: Boolean(serverEnv.EMAIL_FROM_ADDRESS),
       orderId,
     });
     return { sent: false, reason: "not_configured" as const };
@@ -400,22 +400,22 @@ export async function sendOrderConfirmationEmailIfNeeded(orderId: string) {
 
   console.log("[EMAIL][SENDING]", {
     orderId,
-    from: env.EMAIL_FROM_ADDRESS,
+    from: serverEnv.EMAIL_FROM_ADDRESS,
     to: order.buyer_email,
-    replyTo: env.EMAIL_REPLY_TO || null,
+    replyTo: serverEnv.EMAIL_REPLY_TO || null,
     subject: getOrderEmailSubject(order),
   });
 
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      Authorization: `Bearer ${serverEnv.RESEND_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: env.EMAIL_FROM_ADDRESS,
+      from: serverEnv.EMAIL_FROM_ADDRESS,
       to: [order.buyer_email],
-      reply_to: env.EMAIL_REPLY_TO || undefined,
+      reply_to: serverEnv.EMAIL_REPLY_TO || undefined,
       subject: getOrderEmailSubject(order),
       html,
       text,

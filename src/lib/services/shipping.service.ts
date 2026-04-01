@@ -1,6 +1,6 @@
 import { buildShippingOptions as buildMockShippingOptions, ShippingOption } from "@/lib/shipping";
 import { getUpsRates } from "@/lib/adapters/ups.adapter";
-import { env } from "@/lib/env";
+import { serverEnv } from "@/lib/server-env";
 
 type ShippingInput = {
   subtotalCents: number;
@@ -62,7 +62,7 @@ export async function getShippingOptions(
   if (cacheHit && cacheHit.expiresAt > Date.now()) {
     return {
       options: cacheHit.options,
-      source: env.UPS_CLIENT_ID ? "UPS_REAL" : "UPS_MOCK",
+      source: serverEnv.UPS_CLIENT_ID ? "UPS_REAL" : "UPS_MOCK",
     };
   }
 
