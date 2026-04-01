@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireOwnerApi } from "@/lib/auth";
 import { getServiceSupabase } from "@/lib/supabase";
-import { env } from "@/lib/env";
+import { serverEnv } from "@/lib/server-env";
 
 export const runtime = "nodejs";
 
@@ -62,7 +62,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const buffer = Buffer.from(await file.arrayBuffer());
 
     const { error: uploadError } = await service.storage
-      .from(env.SUPABASE_STORAGE_BUCKET)
+      .from(serverEnv.SUPABASE_STORAGE_BUCKET)
       .upload(path, buffer, { contentType: file.type, upsert: false });
 
     if (uploadError) {
@@ -70,7 +70,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
 
     const { data: publicData } = service.storage
-      .from(env.SUPABASE_STORAGE_BUCKET)
+      .from(serverEnv.SUPABASE_STORAGE_BUCKET)
       .getPublicUrl(path);
 
     uploadedRows.push({

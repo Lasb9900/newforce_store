@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
-import { env } from "@/lib/env";
+import { serverEnv } from "@/lib/server-env";
 import { getServiceSupabase } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ function getPaymentIntentId(
 
 export async function GET(req: NextRequest) {
   try {
-    if (!stripe || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    if (!stripe || !serverEnv.SUPABASE_SERVICE_ROLE_KEY) {
       return NextResponse.json(
         { error: "Stripe/Supabase not configured" },
         { status: 500 }

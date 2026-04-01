@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
-import { env } from "@/lib/env";
+import { serverEnv } from "@/lib/server-env";
 import { getServiceSupabase } from "@/lib/supabase";
 import { processLoyaltyAccrual } from "@/lib/services/loyalty.service";
 import { sendOrderConfirmationEmailIfNeeded } from "@/lib/email";
@@ -91,7 +91,7 @@ export async function POST(req: Request) {
   });
 
   try {
-    if (!stripe || !env.STRIPE_WEBHOOK_SECRET || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    if (!stripe || !serverEnv.STRIPE_WEBHOOK_SECRET || !serverEnv.SUPABASE_SERVICE_ROLE_KEY) {
       return NextResponse.json(
         { error: "Stripe/Supabase not configured" },
         { status: 500 }
@@ -109,7 +109,7 @@ export async function POST(req: Request) {
       event = stripe.webhooks.constructEvent(
         body,
         signature,
-        env.STRIPE_WEBHOOK_SECRET
+        serverEnv.STRIPE_WEBHOOK_SECRET
       );
     } catch (error) {
       console.error("[STRIPE_WEBHOOK][SIGNATURE_ERROR]", error);

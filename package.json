@@ -10,7 +10,11 @@
     "seed": "tsx scripts/seed.ts",
     "clean": "node -e \"try{require('fs').rmSync('.next',{ recursive: true, force: true })}catch{}\"",
     "predev": "npm run clean",
-    "prebuild": "npm run clean"
+    "prebuild": "npm run clean",
+    "check": "npm run lint && npm run typecheck",
+    "typecheck": "tsc --noEmit",
+    "find:wrong-env": "grep -R \"env\\.SUPABASE_\\|env\\.STRIPE_\\|env\\.RESEND_\\|env\\.EMAIL_\\|env\\.UPS_\" -n src || true",
+    "find:serverenv-in-client": "grep -R \"serverEnv\" -n src/app src/components src/lib || true"
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",

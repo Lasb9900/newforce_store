@@ -3,6 +3,7 @@ import { stripeCheckoutSchema } from "@/lib/schemas";
 import { getServerSupabase } from "@/lib/supabase";
 import { stripe } from "@/lib/stripe";
 import { env } from "@/lib/env";
+import { serverEnv } from "@/lib/server-env";
 import { validateCartItems } from "@/lib/checkout";
 import { calculateTaxCents, resolveShippingOption } from "@/lib/shipping";
 import { getShippingOptions } from "@/lib/services/shipping.service";
@@ -168,11 +169,11 @@ export async function POST(req: Request) {
     });
 
     const successUrl =
-      env.STRIPE_SUCCESS_URL ??
+      serverEnv.STRIPE_SUCCESS_URL ??
       `${env.NEXT_PUBLIC_SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`;
 
     const cancelUrl =
-      env.STRIPE_CANCEL_URL ??
+      serverEnv.STRIPE_CANCEL_URL ??
       `${env.NEXT_PUBLIC_SITE_URL}/cancel`;
 
     const session = await stripe.checkout.sessions.create({
