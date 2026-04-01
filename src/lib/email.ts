@@ -352,6 +352,8 @@ async function logOrderEmailEvent(
 }
 
 export async function sendOrderConfirmationEmailIfNeeded(orderId: string) {
+  console.log("[EMAIL][START]", { orderId });
+
   if (!env.RESEND_API_KEY || !env.EMAIL_FROM_ADDRESS) {
     console.warn("[EMAIL][SKIPPED_NOT_CONFIGURED]", {
       hasApiKey: Boolean(env.RESEND_API_KEY),
@@ -362,23 +364,47 @@ export async function sendOrderConfirmationEmailIfNeeded(orderId: string) {
   }
 
   if (await hasConfirmationEmailBeenSent(orderId)) {
+    console.warn("[EMAIL][SKIPPED_ALREADY_SENT]", { orderId });
     return { sent: false, reason: "already_sent" as const };
   }
 
   const order = await getOrderForEmail(orderId);
+  console.log("[EMAIL][ORDER_FETCHED]", {
+    orderId,
+    found: Boolean(order),
+    status: order?.status,
+    payment_status: order?.payment_status,
+    buyer_email: order?.buyer_email,
+  });
+
   if (!order) {
+    console.warn("[EMAIL][SKIPPED_ORDER_NOT_FOUND]", { orderId });
     return { sent: false, reason: "order_not_found" as const };
   }
 
   if (order.status !== "paid" || order.payment_status !== "paid") {
+    console.warn("[EMAIL][SKIPPED_ORDER_NOT_PAID]", {
+      orderId,
+      status: order.status,
+      payment_status: order.payment_status,
+    });
     return { sent: false, reason: "order_not_paid" as const };
   }
 
   if (!order.buyer_email) {
+    console.warn("[EMAIL][SKIPPED_MISSING_EMAIL]", { orderId });
     return { sent: false, reason: "missing_email" as const };
   }
 
   const { html, text } = renderOrderConfirmationEmail(order);
+
+  console.log("[EMAIL][SENDING]", {
+    orderId,
+    from: env.EMAIL_FROM_ADDRESS,
+    to: order.buyer_email,
+    replyTo: env.EMAIL_REPLY_TO || null,
+    subject: getOrderEmailSubject(order),
+  });
 
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -398,6 +424,13 @@ export async function sendOrderConfirmationEmailIfNeeded(orderId: string) {
 
   const payload = (await response.json().catch(() => null)) as ResendSendResponse | null;
 
+  console.log("[EMAIL][RESEND_RESPONSE]", {
+    orderId,
+    ok: response.ok,
+    status: response.status,
+    payload,
+  });
+
   if (!response.ok) {
     await logOrderEmailEvent(orderId, ORDER_CONFIRMATION_FAILED_EVENT, {
       provider: "resend",
@@ -414,6 +447,11 @@ export async function sendOrderConfirmationEmailIfNeeded(orderId: string) {
     resend_email_id: payload?.id ?? null,
     to: order.buyer_email,
     payment_method: order.payment_method,
+  });
+
+  console.log("[EMAIL][SENT_OK]", {
+    orderId,
+    resendEmailId: payload?.id ?? null,
   });
 
   return {

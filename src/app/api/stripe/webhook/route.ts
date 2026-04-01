@@ -76,13 +76,10 @@ function getShippingFieldsFromStripe(session: Stripe.Checkout.Session) {
 }
 
 export async function GET() {
-  return NextResponse.json({
-    ok: true,
-    route: "stripe-webhook",
-    hasStripe: Boolean(stripe),
-    hasWebhookSecret: Boolean(env.STRIPE_WEBHOOK_SECRET),
-    hasServiceRole: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
-  });
+  return NextResponse.json(
+    { error: "Method not allowed" },
+    { status: 405 }
+  );
 }
 
 export async function POST(req: Request) {

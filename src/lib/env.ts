@@ -59,10 +59,76 @@ function normalizeSupabaseUrl(rawUrl: string): string {
   return "https://example.supabase.co";
 }
 
+function isMissing(value?: string) {
+  return !value || !value.trim();
+}
+
+function isPlaceholderSupabaseUrl(value?: string) {
+  return !value || value.includes("example.supabase.co");
+}
+
+function isPlaceholderAnonKey(value?: string) {
+  return !value || value === "dev-anon-key";
+}
+
+function assertProductionEnv(config: {
+  SUPABASE_URL?: string;
+  NEXT_PUBLIC_SUPABASE_URL: string;
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: string;
+  NEXT_PUBLIC_SITE_URL: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+}) {
+  if (process.env.NODE_ENV !== "production") {
+    return;
+  }
+
+  const missing: string[] = [];
+
+  if (!config.SUPABASE_URL || isPlaceholderSupabaseUrl(config.SUPABASE_URL)) {
+    missing.push("SUPABASE_URL");
+  }
+
+  if (isPlaceholderSupabaseUrl(config.NEXT_PUBLIC_SUPABASE_URL)) {
+    missing.push("NEXT_PUBLIC_SUPABASE_URL");
+  }
+
+  if (isPlaceholderAnonKey(config.NEXT_PUBLIC_SUPABASE_ANON_KEY)) {
+    missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  }
+
+  if (isMissing(config.NEXT_PUBLIC_SITE_URL) || config.NEXT_PUBLIC_SITE_URL.includes("localhost")) {
+    missing.push("NEXT_PUBLIC_SITE_URL");
+  }
+
+  if (isMissing(config.SUPABASE_SERVICE_ROLE_KEY)) {
+    missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  }
+
+  if (isMissing(config.STRIPE_SECRET_KEY)) {
+    missing.push("STRIPE_SECRET_KEY");
+  }
+
+  if (isMissing(config.STRIPE_WEBHOOK_SECRET)) {
+    missing.push("STRIPE_WEBHOOK_SECRET");
+  }
+
+  if (missing.length) {
+    throw new Error(
+      `[ENV] Missing or invalid production environment variables: ${missing.join(", ")}`
+    );
+  }
+}
+
 const parsedEnv = schema.parse(process.env);
 
-export const env = {
+const normalizedEnv = {
   ...parsedEnv,
   SUPABASE_URL: parsedEnv.SUPABASE_URL ? normalizeSupabaseUrl(parsedEnv.SUPABASE_URL) : undefined,
   NEXT_PUBLIC_SUPABASE_URL: normalizeSupabaseUrl(parsedEnv.NEXT_PUBLIC_SUPABASE_URL),
 };
+
+assertProductionEnv(normalizedEnv);
+
+export const env = normalizedEnv;

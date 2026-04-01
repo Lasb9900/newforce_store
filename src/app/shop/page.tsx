@@ -10,7 +10,7 @@ import { getCategoryBySlug } from "@/lib/categories";
 import { applyShopFilters, parseShopFilters } from "@/lib/shop";
 
 export const metadata: Metadata = {
-  title: "Shop | Newforce Store",
+  title: "Shop | Liquidation Plus",
   description: "Browse electronics and home products with smart filters and secure checkout.",
 };
 
