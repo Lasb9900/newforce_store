@@ -3,7 +3,7 @@ import { requireOwnerApi } from "@/lib/auth";
 import { getServiceSupabase } from "@/lib/supabase";
 
 type ParsedInventoryRow = {
-  itemNumber: string;
+  importKey: string;
   department: string;
   itemDescription: string;
   qty: number;
@@ -11,11 +11,20 @@ type ParsedInventoryRow = {
   category: string;
   condition: string;
   unitRetail?: number | null;
+  extRetail?: number | null;
+  salesPrice?: number | null;
+  actualSalesPrice?: number | null;
+  vendor: string;
+  categoryCode: string;
 };
 
 function dollarsToCents(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) return null;
   return Math.round(value * 100);
+}
+
+function buildSyntheticSku(row: ParsedInventoryRow) {
+  return `csv-${row.importKey}`.slice(0, 120);
 }
 
 export async function POST(req: Request) {
@@ -38,49 +47,82 @@ export async function POST(req: Request) {
 
   for (const row of rows) {
     try {
-      const itemNumber = String(row.itemNumber ?? "").trim();
+      const importKey = String(row.importKey ?? "").trim();
       const itemDescription = String(row.itemDescription ?? "").trim();
       const department = String(row.department ?? "").trim();
       const sellerCategory = String(row.sellerCategory ?? "").trim();
       const category = String(row.category ?? "").trim();
       const condition = String(row.condition ?? "").trim();
+      const vendor = String(row.vendor ?? "").trim();
+      const categoryCode = String(row.categoryCode ?? "").trim();
       const qty = Number(row.qty ?? 0);
 
-      if (!itemNumber || !itemDescription || !Number.isFinite(qty) || qty < 0) {
-        failed += 1;
-        errors.push(`Fila ${row.itemNumber || "sin item"}: datos inválidos`);
-        continue;
-      }
+      if (!itemDescription) {
+  failed += 1;
+  errors.push("Fila sin nombre de producto: datos inválidos");
+  continue;
+}
 
-      const payload = {
-        sku: itemNumber,
-        item_number: itemNumber,
-        name: itemDescription,
-        department: department || null,
-        item_description: itemDescription || null,
-        seller_category: sellerCategory || null,
-        category: category || null,
-        condition: condition || null,
-        qty,
-        base_stock: qty,
-        base_price_cents: dollarsToCents(row.unitRetail),
+      const salesPriceCents = dollarsToCents(row.salesPrice);
+      const unitRetailCents = dollarsToCents(row.unitRetail);
+      const extRetailCents = dollarsToCents(row.extRetail);
+      const actualSalesPriceCents = dollarsToCents(row.actualSalesPrice);
+      const syntheticSku = buildSyntheticSku(row);
+
+      const candidatesQuery = supabase
+  .from("products")
+  .select("id, base_price_cents, price_cents, item_description, vendor, category_code, condition, department, created_at")
+  .eq("item_description", itemDescription);
+
+if (vendor) {
+  candidatesQuery.eq("vendor", vendor);
+}
+
+if (categoryCode) {
+  candidatesQuery.eq("category_code", categoryCode);
+}
+
+const lookup = await candidatesQuery.limit(10);
+
+if (lookup.error) {
+  throw new Error(lookup.error.message);
+}
+
+const candidates = lookup.data ?? [];
+const matchedProduct = candidates[0] ?? null;
+
+      const basePayload = {
+            sku: syntheticSku,
+            item_number: importKey,
+            name: itemDescription,
+            department: department || null,
+            item_description: itemDescription || null,
+            seller_category: sellerCategory || null,
+            category: category || null,
+            condition: condition || null,
+            vendor: vendor || null,
+            category_code: categoryCode || null,
+            qty,
+            base_stock: qty,
+            unit_retail_cents: unitRetailCents,
+            ext_retail_cents: extRetailCents,
+            actual_sales_price_cents: actualSalesPriceCents,
       };
 
-      const { data: existing, error: existingError } = await supabase
-        .from("products")
-        .select("id")
-        .eq("sku", itemNumber)
-        .maybeSingle();
+      if (matchedProduct?.id) {
+        const updatePayload = {
+  ...basePayload,
+  ...(salesPriceCents != null ? { price_cents: salesPriceCents } : {}),
+  base_price_cents:
+  matchedProduct.base_price_cents == null
+    ? salesPriceCents ?? matchedProduct.base_price_cents
+    : matchedProduct.base_price_cents,
+};
 
-      if (existingError) {
-        throw new Error(existingError.message);
-      }
-
-      if (existing?.id) {
         const { error: updateError } = await supabase
           .from("products")
-          .update(payload)
-          .eq("id", existing.id);
+          .update(updatePayload)
+          .eq("id", matchedProduct.id);
 
         if (updateError) {
           throw new Error(updateError.message);
@@ -89,21 +131,20 @@ export async function POST(req: Request) {
         updated += 1;
       } else {
         const insertPayload = {
-          ...payload,
-          active: true,
-          featured: false,
-          featured_rank: 0,
-          has_variants: false,
-          redeemable: false,
-          points_price: null,
-          category_id: null,
-          description: null,
-          price_cents: null,
-        };
+  ...basePayload,
+  active: true,
+  featured: false,
+  featured_rank: 0,
+  has_variants: false,
+  redeemable: false,
+  points_price: null,
+  category_id: null,
+  description: null,
+  price_cents: salesPriceCents ?? 0,
+  base_price_cents: salesPriceCents ?? 0,
+};
 
-        const { error: insertError } = await supabase
-          .from("products")
-          .insert(insertPayload);
+        const { error: insertError } = await supabase.from("products").insert(insertPayload);
 
         if (insertError) {
           throw new Error(insertError.message);
@@ -114,7 +155,7 @@ export async function POST(req: Request) {
     } catch (error) {
       failed += 1;
       errors.push(
-        `Item ${row.itemNumber ?? "sin item"}: ${
+        `Item ${row.itemDescription ?? "sin descripción"}: ${
           error instanceof Error ? error.message : "Error desconocido"
         }`,
       );

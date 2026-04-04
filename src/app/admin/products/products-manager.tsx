@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 
 type ParsedImportRow = {
   line?: number;
-  itemNumber: string;
+  importKey: string;
   department: string;
   itemDescription: string;
   qty: number;
@@ -12,6 +12,11 @@ type ParsedImportRow = {
   category: string;
   condition: string;
   unitRetail?: number | null;
+  extRetail?: number | null;
+  salesPrice?: number | null;
+  actualSalesPrice?: number | null;
+  vendor: string;
+  categoryCode: string;
 };
 
 type ProductRow = {
@@ -26,6 +31,11 @@ type ProductRow = {
   condition?: string | null;
   base_price_cents: number | null;
   price_cents?: number | null;
+  unit_retail_cents?: number | null;
+  ext_retail_cents?: number | null;
+  actual_sales_price_cents?: number | null;
+  vendor?: string | null;
+  category_code?: string | null;
   base_stock: number;
   qty?: number;
   active: boolean;
@@ -44,36 +54,42 @@ type ProductRow = {
   points_price?: number | null;
 };
 
-type ProductForm = {
-  name: string;
-  description: string;
-  active: boolean;
-  featured: boolean;
-  featured_rank: number;
-  has_variants: boolean;
+type ProductFormState = {
+  id?: string;
   sku: string;
-  category_id: string | null;
+  name: string;
   department: string;
   item_description: string;
   seller_category: string;
   category: string;
   condition: string;
+  description: string;
   price_cents: number | null;
   base_price_cents: number | null;
   qty: number;
+  active: boolean;
+  featured: boolean;
+  featured_rank: number;
+  has_variants: boolean;
+  category_id: string | null;
   tags: string[];
   redeemable: boolean;
   points_price: number | null;
+  unit_retail_cents: number | null;
+  ext_retail_cents: number | null;
+  actual_sales_price_cents: number | null;
+  vendor: string;
+  category_code: string;
 };
 
-const EMPTY_FORM: ProductForm = {
+const EMPTY_FORM: ProductFormState = {
+  sku: "",
   name: "",
   description: "",
   active: true,
   featured: false,
   featured_rank: 0,
   has_variants: false,
-  sku: "",
   category_id: null,
   department: "",
   item_description: "",
@@ -86,6 +102,11 @@ const EMPTY_FORM: ProductForm = {
   tags: [],
   redeemable: false,
   points_price: null,
+  unit_retail_cents: null,
+  ext_retail_cents: null,
+  actual_sales_price_cents: null,
+  vendor: "",
+  category_code: "",
 };
 
 const PAGE_SIZE = 10;
@@ -108,12 +129,13 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
   >("all");
   const [currentPage, setCurrentPage] = useState(1);
 
-  const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
+  const [form, setForm] = useState<ProductFormState>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [importPreview, setImportPreview] = useState<ParsedImportRow[]>([]);
+  const [importRows, setImportRows] = useState<ParsedImportRow[]>([]);
   const [csvFile, setCsvFile] = useState<File | null>(null);
 
   const [imageFiles, setImageFiles] = useState<File[]>([]);
@@ -222,6 +244,11 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       tags: [],
       redeemable: Boolean(product.redeemable),
       points_price: product.points_price ?? null,
+      unit_retail_cents: centsToDisplayAmount(product.unit_retail_cents),
+ext_retail_cents: centsToDisplayAmount(product.ext_retail_cents),
+actual_sales_price_cents: centsToDisplayAmount(product.actual_sales_price_cents),
+vendor: product.vendor ?? "",
+category_code: product.category_code ?? "",
     });
     setMessage(null);
     setError(null);
@@ -385,23 +412,25 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
     );
 
     const payload = {
-      ...form,
-      name: form.name.trim(),
-      description: form.description || null,
-      sku: form.sku || null,
-      department: form.department || null,
-      item_description: form.item_description || null,
-      seller_category: form.seller_category || null,
-      category: form.category || null,
-      condition: form.condition || null,
-      price_cents: normalizedPrice,
-      base_price_cents: normalizedBasePrice,
-      qty: form.qty,
-      base_stock: form.qty,
-      featured_rank: form.featured ? form.featured_rank : 0,
-      redeemable: form.redeemable,
-      points_price: form.redeemable ? form.points_price : null,
-    };
+  sku: form.sku,
+  name: form.name,
+  department: form.department,
+  seller_category: form.seller_category,
+  category: form.category,
+  condition: form.condition,
+  description: form.description,
+  price_cents: form.price_cents,
+  base_price_cents: form.base_price_cents,
+  points_price: form.points_price,
+  redeemable: form.redeemable,
+  active: form.active,
+  featured: form.featured,
+  unit_retail_cents: form.unit_retail_cents,
+  ext_retail_cents: form.ext_retail_cents,
+  actual_sales_price_cents: form.actual_sales_price_cents,
+  vendor: form.vendor?.trim() || null,
+  category_code: form.category_code?.trim() || null,
+};
 
     const endpoint = editingId ? `/api/admin/products/${editingId}` : "/api/admin/products";
     const method = editingId ? "PUT" : "POST";
@@ -459,64 +488,76 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
   }
 
   async function parseCsv(e: React.FormEvent) {
-    e.preventDefault();
-    if (!csvFile) {
-      setError("Selecciona un archivo CSV");
-      return;
-    }
-
-    const body = new FormData();
-    body.append("file", csvFile);
-
-    const response = await fetch("/api/admin/products/import", {
-      method: "POST",
-      body,
-    });
-    const json = await response.json();
-
-    if (!response.ok) {
-      setError(json.error || "No se pudo leer CSV");
-      setImportResult(null);
-      return;
-    }
-
-    const summary = json.data?.summary;
-    setImportResult(`CSV leído: ${summary.parsedRows} filas válidas · ${summary.failedRows} filas con error`);
-    setMessage("Parseo CSV completado");
-    setImportPreview((json.data?.preview ?? []) as ParsedImportRow[]);
-
-    const errs = json.data?.errors as string[] | undefined;
-    if (errs?.length) {
-      setError(`Filas con error: ${errs.slice(0, 3).join(" | ")}`);
-    }
+  e.preventDefault();
+  if (!csvFile) {
+    setError("Selecciona un archivo CSV");
+    return;
   }
+
+  const body = new FormData();
+  body.append("file", csvFile);
+
+  const response = await fetch("/api/admin/products/import", {
+    method: "POST",
+    body,
+  });
+  const json = await response.json();
+
+  if (!response.ok) {
+    setError(json.error || "No se pudo leer CSV");
+    setImportResult(null);
+    setImportPreview([]);
+    setImportRows([]);
+    return;
+  }
+
+  const summary = json.data?.summary;
+  setImportResult(
+    `CSV leído: ${summary.parsedRows} filas válidas · ${summary.failedRows} filas con error`
+  );
+  setMessage("Parseo CSV completado");
+  setImportPreview((json.data?.preview ?? []) as ParsedImportRow[]);
+  setImportRows((json.data?.parsedRows ?? []) as ParsedImportRow[]);
+
+  const errs = json.data?.errors as string[] | undefined;
+  if (errs?.length) {
+    setError(`Filas con error: ${errs.slice(0, 3).join(" | ")}`);
+  } else {
+    setError(null);
+  }
+}
 
   async function confirmImport() {
-    if (!importPreview.length) {
-      setError("No hay filas parseadas para importar");
-      return;
-    }
-
-    const response = await fetch("/api/admin/products/import/commit", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ rows: importPreview }),
-    });
-
-    const json = await response.json();
-    if (!response.ok) {
-      setError(json.error || "No se pudo guardar importación");
-      return;
-    }
-
-    const s = json.data?.summary;
-    setMessage(`Importación guardada. Insertados: ${s.inserted} · Actualizados: ${s.updated} · Fallidos: ${s.failed}`);
-    const errs = json.data?.errors as string[] | undefined;
-    setError(errs?.length ? `Errores: ${errs.slice(0, 3).join(" | ")}` : null);
-    setImportPreview([]);
-    setCsvFile(null);
-    await refreshProducts();
+  if (!importRows.length) {
+    setError("No hay filas parseadas para importar");
+    return;
   }
+
+  const response = await fetch("/api/admin/products/import/commit", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ rows: importRows }),
+  });
+
+  const json = await response.json();
+  if (!response.ok) {
+    setError(json.error || "No se pudo guardar importación");
+    return;
+  }
+
+  const s = json.data?.summary;
+  setMessage(
+    `Importación guardada. Insertados: ${s.inserted} · Actualizados: ${s.updated} · Fallidos: ${s.failed}`
+  );
+
+  const errs = json.data?.errors as string[] | undefined;
+  setError(errs?.length ? `Errores: ${errs.slice(0, 3).join(" | ")}` : null);
+
+  setImportPreview([]);
+  setImportRows([]);
+  setCsvFile(null);
+  await refreshProducts();
+}
 
   return (
     <div className="space-y-4">
@@ -543,7 +584,7 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
         className="flex flex-wrap items-center gap-2 rounded-xl border border-uiBorder bg-surface p-3"
       >
         <p className="text-sm text-mutedText">
-          Formato CSV esperado: Item #, Department, Item Description, Qty, Seller Category, Category, Condition, Unit Retail        </p>
+          Formato CSV esperado: Department, Item Description, Qty, Unit Retail, Ext. Retail, Sales price, actual sales price, Vendor, Category Code, Seller Category, Category, Condition       </p>
         <button
           type="submit"
           className="rounded-md border border-uiBorder px-3 py-1.5 text-sm hover:bg-surfaceMuted"
@@ -633,6 +674,61 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
             }))
           }
         />
+        <input
+  className="rounded-md border border-uiBorder p-2.5"
+  placeholder="Vendor"
+  value={form.vendor ?? ""}
+  onChange={(e) => setForm((f) => ({ ...f, vendor: e.target.value }))}
+/>
+
+<input
+  className="rounded-md border border-uiBorder p-2.5"
+  placeholder="Category Code"
+  value={form.category_code ?? ""}
+  onChange={(e) => setForm((f) => ({ ...f, category_code: e.target.value }))}
+/>
+
+<input
+  type="number"
+  step="0.01"
+  className="rounded-md border border-uiBorder p-2.5"
+  placeholder="Unit Retail (costo interno)"
+  value={form.unit_retail_cents ?? ""}
+  onChange={(e) =>
+    setForm((f) => ({
+      ...f,
+      unit_retail_cents: e.target.value === "" ? null : Number(e.target.value),
+    }))
+  }
+/>
+
+<input
+  type="number"
+  step="0.01"
+  className="rounded-md border border-uiBorder p-2.5"
+  placeholder="Ext. Retail"
+  value={form.ext_retail_cents ?? ""}
+  onChange={(e) =>
+    setForm((f) => ({
+      ...f,
+      ext_retail_cents: e.target.value === "" ? null : Number(e.target.value),
+    }))
+  }
+/>
+
+<input
+  type="number"
+  step="0.01"
+  className="rounded-md border border-uiBorder p-2.5"
+  placeholder="Actual sales price"
+  value={form.actual_sales_price_cents ?? ""}
+  onChange={(e) =>
+    setForm((f) => ({
+      ...f,
+      actual_sales_price_cents: e.target.value === "" ? null : Number(e.target.value),
+    }))
+  }
+/>
         <input
           type="number"
           className="rounded-md border border-uiBorder p-2.5"
@@ -880,40 +976,48 @@ export default function ProductsManager({ initialProducts }: { initialProducts: 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
       {importPreview.length > 0 ? (
-        <div className="rounded-xl border border-uiBorder bg-surface p-3">
-          <p className="mb-2 text-sm font-semibold">Vista previa CSV (primeras 20 filas)</p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-surfaceMuted text-left">
-                <tr>
-                  <th className="px-2 py-1">Item #</th>
-                  <th className="px-2 py-1">Department</th>
-                  <th className="px-2 py-1">Item Description</th>
-                  <th className="px-2 py-1">Qty</th>
-                  <th className="px-2 py-1">Seller Category</th>
-                  <th className="px-2 py-1">Category</th>
-                  <th className="px-2 py-1">Condition</th>
-                  <th className="px-2 py-1">Unit Retail</th>
-                </tr>
-              </thead>
-              <tbody>
-                {importPreview.map((row, idx) => (
-                  <tr key={idx} className="border-t border-uiBorder">
-                    <td className="px-2 py-1">{String(row.itemNumber ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.department ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.itemDescription ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.qty ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.sellerCategory ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.category ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.condition ?? "")}</td>
-                    <td className="px-2 py-1">{String(row.unitRetail ?? "")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
+  <div className="rounded-xl border border-uiBorder bg-surface p-3">
+    <p className="mb-2 text-sm font-semibold">Vista previa CSV (primeras 20 filas)</p>
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead className="bg-surfaceMuted text-left">
+          <tr>
+            <th className="px-2 py-1">Department</th>
+            <th className="px-2 py-1">Item Description</th>
+            <th className="px-2 py-1">Qty</th>
+            <th className="px-2 py-1">Seller Category</th>
+            <th className="px-2 py-1">Category</th>
+            <th className="px-2 py-1">Condition</th>
+            <th className="px-2 py-1">Vendor</th>
+            <th className="px-2 py-1">Category Code</th>
+            <th className="px-2 py-1">Unit Retail</th>
+            <th className="px-2 py-1">Ext. Retail</th>
+            <th className="px-2 py-1">Sales price</th>
+            <th className="px-2 py-1">actual sales price</th>
+          </tr>
+        </thead>
+        <tbody>
+          {importPreview.map((row, idx) => (
+            <tr key={idx} className="border-t border-uiBorder">
+              <td className="px-2 py-1">{String(row.department ?? "")}</td>
+              <td className="px-2 py-1">{String(row.itemDescription ?? "")}</td>
+              <td className="px-2 py-1">{String(row.qty ?? "")}</td>
+              <td className="px-2 py-1">{String(row.sellerCategory ?? "")}</td>
+              <td className="px-2 py-1">{String(row.category ?? "")}</td>
+              <td className="px-2 py-1">{String(row.condition ?? "")}</td>
+              <td className="px-2 py-1">{String(row.vendor ?? "")}</td>
+              <td className="px-2 py-1">{String(row.categoryCode ?? "")}</td>
+              <td className="px-2 py-1">{String(row.unitRetail ?? "")}</td>
+              <td className="px-2 py-1">{String(row.extRetail ?? "")}</td>
+              <td className="px-2 py-1">{String(row.salesPrice ?? "")}</td>
+              <td className="px-2 py-1">{String(row.actualSalesPrice ?? "")}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">

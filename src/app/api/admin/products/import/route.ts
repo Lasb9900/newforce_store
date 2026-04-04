@@ -2,18 +2,22 @@ import { NextResponse } from "next/server";
 import { requireOwnerApi } from "@/lib/auth";
 
 const REQUIRED_HEADERS = [
-  "item #",
   "department",
   "item description",
   "qty",
+  "unit retail",
+  "ext. retail",
+  "sales price",
+  "actual sales price",
+  "vendor",
+  "category code",
   "seller category",
   "category",
   "condition",
-  "unit retail",
 ] as const;
 
 type ParsedInventoryRow = {
-  itemNumber: string;
+  importKey: string;
   department: string;
   itemDescription: string;
   qty: number;
@@ -21,13 +25,18 @@ type ParsedInventoryRow = {
   category: string;
   condition: string;
   unitRetail: number | null;
+  extRetail: number | null;
+  salesPrice: number | null;
+  actualSalesPrice: number | null;
+  vendor: string;
+  categoryCode: string;
 };
 
 function normalizeHeader(header: string) {
   return header.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function parseUnitRetail(value: string | undefined) {
+function parseMoney(value: string | undefined) {
   if (!value) return null;
 
   const normalized = value.replace(/[$,\s]/g, "").trim();
@@ -68,6 +77,34 @@ function parseCsvLine(line: string) {
   return values;
 }
 
+function slugifyPart(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+function buildImportKey(input: {
+  department: string;
+  itemDescription: string;
+  vendor: string;
+  categoryCode: string;
+  condition: string;
+}) {
+  const parts = [
+    slugifyPart(input.department),
+    slugifyPart(input.itemDescription),
+    slugifyPart(input.vendor),
+    slugifyPart(input.categoryCode),
+    slugifyPart(input.condition),
+  ].filter(Boolean);
+
+  return parts.join("|");
+}
+
 export async function POST(req: Request) {
   const auth = await requireOwnerApi();
   if ("error" in auth) return auth.error;
@@ -101,7 +138,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const preview: ParsedInventoryRow[] = [];
+  const parsedRows: ParsedInventoryRow[] = [];
   const errors: string[] = [];
 
   for (let index = 1; index < lines.length; index += 1) {
@@ -116,33 +153,74 @@ export async function POST(req: Request) {
       row[headerValues[col]] = rowValues[col] ?? "";
     }
 
-    const itemNumber = row["item #"]?.trim() ?? "";
     const department = row["department"]?.trim() ?? "";
     const itemDescription = row["item description"]?.trim() ?? "";
     const qtyRaw = row["qty"]?.trim() ?? "";
     const sellerCategory = row["seller category"]?.trim() ?? "";
     const category = row["category"]?.trim() ?? "";
     const condition = row["condition"]?.trim() ?? "";
-    const unitRetail = parseUnitRetail(row["unit retail"]);
+    const vendor = row["vendor"]?.trim() ?? "";
+    const categoryCode = row["category code"]?.trim() ?? "";
 
-    const qty = Number(qtyRaw);
+    const unitRetail = parseMoney(row["unit retail"]);
+    const extRetail = parseMoney(row["ext. retail"]);
+    const salesPrice = parseMoney(row["sales price"]);
+    const actualSalesPrice = parseMoney(row["actual sales price"]);
 
-    const rowErrors: string[] = [];
-    if (!itemNumber) rowErrors.push("Item # vacío");
-    if (!department) rowErrors.push("Department vacío");
-    if (!itemDescription) rowErrors.push("Item Description vacío");
-    if (!qtyRaw || !Number.isFinite(qty) || qty < 0) rowErrors.push("Qty inválido");
-    if (!sellerCategory) rowErrors.push("Seller Category vacío");
-    if (!category) rowErrors.push("Category vacío");
-    if (!condition) rowErrors.push("Condition vacío");
+    const qtyParsed = Number(qtyRaw);
+    const qty = Number.isFinite(qtyParsed) && qtyParsed >= 0 ? qtyParsed : 0;
+
+    const looksEmpty =
+  !itemDescription &&
+  !vendor &&
+  !categoryCode &&
+  !sellerCategory &&
+  !category &&
+  !condition &&
+  !qtyRaw &&
+  salesPrice == null &&
+  unitRetail == null &&
+  extRetail == null &&
+  actualSalesPrice == null;
+
+if (looksEmpty) {
+  continue;
+}
+
+const rowErrors: string[] = [];
+
+if (!itemDescription) {
+  rowErrors.push("Item Description vacío");
+}
+
+if (salesPrice != null && salesPrice < 0) {
+  rowErrors.push("Sales price inválido");
+}
+
+if (rowErrors.length) {
+  errors.push(`Fila ${index + 1}: ${rowErrors.join(" | ")}`);
+  continue;
+}
+
+    const importKey = buildImportKey({
+      department,
+      itemDescription,
+      vendor,
+      categoryCode,
+      condition,
+    });
+
+    if (!importKey) {
+      rowErrors.push("No se pudo generar la clave interna de importación");
+    }
 
     if (rowErrors.length) {
       errors.push(`Fila ${index + 1}: ${rowErrors.join(" | ")}`);
       continue;
     }
 
-    preview.push({
-      itemNumber,
+    parsedRows.push({
+      importKey,
       department,
       itemDescription,
       qty,
@@ -150,15 +228,20 @@ export async function POST(req: Request) {
       category,
       condition,
       unitRetail,
+      extRetail,
+      salesPrice,
+      actualSalesPrice,
+      vendor,
+      categoryCode,
     });
   }
 
   return NextResponse.json({
     data: {
-      preview: preview.slice(0, 20),
-      parsedRows: preview,
+      preview: parsedRows.slice(0, 20),
+      parsedRows,
       summary: {
-        parsedRows: preview.length,
+        parsedRows: parsedRows.length,
         failedRows: errors.length,
       },
       errors,

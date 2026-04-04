@@ -76,6 +76,11 @@ export const adminProductSchema = z.object({
   qty: z.number().int().nonnegative().optional(),
   redeemable: z.boolean().default(false),
   points_price: z.number().int().positive().nullable().optional(),
+  vendor: z.string().nullable().optional(),
+category_code: z.string().nullable().optional(),
+unit_retail_cents: z.number().nullable().optional(),
+ext_retail_cents: z.number().nullable().optional(),
+actual_sales_price_cents: z.number().nullable().optional(),
 });
 
 export const adminVariantSchema = z.object({

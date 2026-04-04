@@ -11,6 +11,17 @@ function normalizeProductPayload(payload: Record<string, unknown>) {
   const priceCents = (payload.price_cents as number | null | undefined) ?? basePrice;
   const condition = (payload.condition as string | null | undefined) ?? null;
   const categoryText = (payload.category as string | null | undefined) ?? null;
+  const vendor = (payload.vendor as string | null | undefined)?.trim() ?? null;
+  const categoryCode = (payload.category_code as string | null | undefined)?.trim() ?? null;
+
+  const unitRetailCents =
+    typeof payload.unit_retail_cents === "number" ? payload.unit_retail_cents : null;
+  const extRetailCents =
+    typeof payload.ext_retail_cents === "number" ? payload.ext_retail_cents : null;
+  const actualSalesPriceCents =
+    typeof payload.actual_sales_price_cents === "number"
+      ? payload.actual_sales_price_cents
+      : null;
 
   const redeemable = Boolean(payload.redeemable);
   const pointsPrice =
@@ -26,6 +37,11 @@ function normalizeProductPayload(payload: Record<string, unknown>) {
     price_cents: priceCents,
     condition,
     category: categoryText,
+    vendor,
+    category_code: categoryCode,
+    unit_retail_cents: unitRetailCents,
+    ext_retail_cents: extRetailCents,
+    actual_sales_price_cents: actualSalesPriceCents,
     redeemable,
     points_price: pointsPrice,
   };
