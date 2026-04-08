@@ -4,7 +4,7 @@ import { requireUserApi } from "@/lib/auth";
 import { CartApiError, loadUserCart, normalizeCartItems, saveUserCart } from "@/lib/cart-server";
 
 const bodySchema = z.object({
-  guestItems: z.array(z.object({ productId: z.string().uuid(), variantId: z.string().uuid().optional(), qty: z.number().int().min(1).max(999) })).max(25),
+  guestItems: z.array(z.object({ productId: z.string().uuid(), variantId: z.string().uuid().nullable().optional(), qty: z.number().int().min(1).max(999) })).max(25),
 });
 
 export async function POST(req: Request) {

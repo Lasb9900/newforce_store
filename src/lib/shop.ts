@@ -23,11 +23,49 @@ export type ShopFilters = {
 };
 
 export function productPrice(product: Product) {
-  return product.variants?.length ? Math.min(...product.variants.map((v) => v.price_cents)) : (product.base_price_cents ?? 0);
+  if (product.variants?.length) {
+    const activeVariantPrices = product.variants
+      .filter((variant) => variant.active !== false)
+      .map((variant) => Number(variant.price_cents ?? 0))
+      .filter((price) => price > 0);
+
+    if (activeVariantPrices.length) {
+      return Math.min(...activeVariantPrices);
+    }
+  }
+
+  return Number(product.price_cents ?? product.base_price_cents ?? 0);
 }
 
 export function productCategory(product: Product) {
   return getProductCategoryMeta(product).slug;
+}
+
+function productStock(product: Product) {
+  if (product.variants?.length) {
+    const activeVariantStock = product.variants
+      .filter((variant) => variant.active !== false)
+      .reduce((sum, variant) => sum + Number(variant.stock ?? 0), 0);
+
+    return activeVariantStock;
+  }
+
+  return Number(product.base_stock ?? product.qty ?? 0);
+}
+
+function productComparePrice(product: Product) {
+  return Number(product.base_price_cents ?? 0);
+}
+
+function productDiscountAmount(product: Product) {
+  const current = productPrice(product);
+  const original = productComparePrice(product);
+
+  if (!(original > 0 && current > 0 && current < original)) {
+    return 0;
+  }
+
+  return original - current;
 }
 
 export function parseShopFilters(params: Record<string, string | string[] | undefined>): ShopFilters {
@@ -57,9 +95,15 @@ export function applyShopFilters(products: Product[], filters: ShopFilters) {
   const filtered = products.filter((product) => {
     const price = productPrice(product);
     const category = productCategory(product);
-    const stock = product.base_stock ?? product.qty ?? 0;
-    const comparePrice = product.price_cents ?? 0;
-    const searchable = [product.name, product.sku ?? "", product.department ?? "", product.seller_category ?? "", product.item_number ?? ""]
+    const stock = productStock(product);
+    const comparePrice = productComparePrice(product);
+    const searchable = [
+      product.name,
+      product.sku ?? "",
+      product.department ?? "",
+      product.seller_category ?? "",
+      product.item_number ?? "",
+    ]
       .join(" ")
       .toLowerCase();
 
@@ -69,7 +113,12 @@ export function applyShopFilters(products: Product[], filters: ShopFilters) {
     if (filters.maxPrice && price > filters.maxPrice) return false;
     if (filters.stock === "in" && stock <= 0) return false;
     if (filters.stock === "out" && stock > 0) return false;
-    if (filters.discounted && comparePrice <= price) return false;
+
+    if (filters.discounted) {
+      const hasRealDiscount = comparePrice > 0 && price > 0 && price < comparePrice;
+      if (!hasRealDiscount) return false;
+    }
+
     if (filters.featured && !product.featured) return false;
 
     return true;
@@ -78,25 +127,36 @@ export function applyShopFilters(products: Product[], filters: ShopFilters) {
   return filtered.sort((a, b) => {
     const aPrice = productPrice(a);
     const bPrice = productPrice(b);
-    const aDiscount = Math.max((a.price_cents ?? 0) - aPrice, 0);
-    const bDiscount = Math.max((b.price_cents ?? 0) - bPrice, 0);
+    const aDiscount = productDiscountAmount(a);
+    const bDiscount = productDiscountAmount(b);
 
     switch (filters.sort) {
       case "price_asc":
         return aPrice - bPrice;
+
       case "price_desc":
         return bPrice - aPrice;
+
       case "discount_desc":
-        return bDiscount - aDiscount;
+        return bDiscount - aDiscount || aPrice - bPrice;
+
       case "newest":
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+
       case "best_selling":
-        return Number(b.featured) - Number(a.featured);
+        return Number(b.featured) - Number(a.featured) ||
+          (a.featured_rank ?? Number.MAX_SAFE_INTEGER) - (b.featured_rank ?? Number.MAX_SAFE_INTEGER) ||
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+
       case "rating_desc":
-        return Number(b.featured) - Number(a.featured);
+        return Number(b.featured) - Number(a.featured) ||
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+
       case "featured":
       default:
-        return Number(b.featured) - Number(a.featured) || a.featured_rank - b.featured_rank;
+        return Number(b.featured) - Number(a.featured) ||
+          (a.featured_rank ?? Number.MAX_SAFE_INTEGER) - (b.featured_rank ?? Number.MAX_SAFE_INTEGER) ||
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     }
   });
 }

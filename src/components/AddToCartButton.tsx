@@ -5,13 +5,16 @@ import { useCartStore } from "@/lib/cart-store";
 
 type AddToCartButtonProps = {
   productId: string;
+  variantId?: string | null;
+  variantName?: string | null;
+  sku?: string | null;
   name: string;
   unitPriceCents: number;
   imageUrl?: string | null;
   stock: number;
 };
 
-export function AddToCartButton({ productId, name, unitPriceCents, imageUrl, stock }: AddToCartButtonProps) {
+export function AddToCartButton({ productId, variantId, variantName, sku, name, unitPriceCents, imageUrl, stock }: AddToCartButtonProps) {
   const addItem = useCartStore((state) => state.addItem);
   const initialize = useCartStore((state) => state.initialize);
   const syncing = useCartStore((state) => state.syncing);
@@ -29,10 +32,13 @@ export function AddToCartButton({ productId, name, unitPriceCents, imageUrl, sto
         await initialize();
         await addItem({
           productId,
+          variantId: variantId ?? undefined,
           qty: 1,
           name,
           unitPriceCents,
           imageUrl: imageUrl ?? undefined,
+          variantName: variantName ?? undefined,
+          sku: sku ?? undefined,
           availableStock: stock,
         });
         setAdded(true);

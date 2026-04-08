@@ -120,7 +120,13 @@ function extractCandidateIds(payload: RpcArrayShape | null) {
 function extractBaseFromPayload(rawData: unknown): PayloadBaseShape {
   const payload = pickRpcObject(rawData);
   const { saleId } = extractCandidateIds(payload);
-  const totalCandidate = payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? null;
+
+  const totalCandidate =
+    payload?.total_cents ??
+    payload?.total ??
+    payload?.data?.total_cents ??
+    payload?.data?.total ??
+    null;
 
   return {
     saleId,
@@ -148,12 +154,15 @@ async function fetchPosSaleById(db: ReturnType<typeof getServiceSupabase>, saleI
   };
 }
 
-async function fetchRecentPosSaleFallback(db: ReturnType<typeof getServiceSupabase>, input: {
-  soldBy: string;
-  productId?: string;
-  qty?: number;
-  paymentMethod?: string;
-}) {
+async function fetchRecentPosSaleFallback(
+  db: ReturnType<typeof getServiceSupabase>,
+  input: {
+    soldBy: string;
+    productId?: string;
+    qty?: number;
+    paymentMethod?: string;
+  }
+) {
   const query = db
     .from("pos_sales")
     .select("id,created_at,total,payment_reference,product_id,qty,payment_method,created_by")
@@ -170,9 +179,16 @@ async function fetchRecentPosSaleFallback(db: ReturnType<typeof getServiceSupaba
   }
 
   const candidate = (data ?? []).find((row) => {
-    const sameProduct = input.productId ? String((row as Record<string, unknown>).product_id ?? "") === input.productId : true;
-    const sameQty = typeof input.qty === "number" ? Number((row as Record<string, unknown>).qty ?? -1) === input.qty : true;
-    const sameMethod = input.paymentMethod ? String((row as Record<string, unknown>).payment_method ?? "") === input.paymentMethod : true;
+    const sameProduct = input.productId
+      ? String((row as Record<string, unknown>).product_id ?? "") === input.productId
+      : true;
+    const sameQty =
+      typeof input.qty === "number"
+        ? Number((row as Record<string, unknown>).qty ?? -1) === input.qty
+        : true;
+    const sameMethod = input.paymentMethod
+      ? String((row as Record<string, unknown>).payment_method ?? "") === input.paymentMethod
+      : true;
     return sameProduct && sameQty && sameMethod;
   }) as Record<string, unknown> | undefined;
 
@@ -186,19 +202,78 @@ async function fetchRecentPosSaleFallback(db: ReturnType<typeof getServiceSupaba
   };
 }
 
-async function resolvePosSaleTotalCents(db: ReturnType<typeof getServiceSupabase>, saleId: string, normalizedTotal: number | null) {
-  if (normalizedTotal != null && Number.isFinite(normalizedTotal) && normalizedTotal >= 0) {
+async function fetchProductUnitPriceCents(
+  db: ReturnType<typeof getServiceSupabase>,
+  productId: string
+) {
+  const { data } = await db
+    .from("products")
+    .select("id,price_cents,base_price_cents")
+    .eq("id", productId)
+    .maybeSingle();
+
+  if (!data) return 0;
+
+  const priceCents = Number(data.price_cents ?? 0);
+  const basePriceCents = Number(data.base_price_cents ?? 0);
+
+  if (priceCents > 0) return priceCents;
+  if (basePriceCents > 0) return basePriceCents;
+
+  return 0;
+}
+
+async function resolvePosSaleTotalCents(
+  db: ReturnType<typeof getServiceSupabase>,
+  saleId: string,
+  normalizedTotal: number | null,
+  productId: string,
+  qty: number
+) {
+  if (normalizedTotal != null && Number.isFinite(normalizedTotal) && normalizedTotal > 0) {
     return normalizedTotal;
   }
 
   const row = await fetchPosSaleById(db, saleId);
-  return row?.totalCents ?? 0;
+  if (row?.totalCents != null && Number.isFinite(row.totalCents) && row.totalCents > 0) {
+    return row.totalCents;
+  }
+
+  const unitPriceCents = await fetchProductUnitPriceCents(db, productId);
+  if (unitPriceCents > 0 && qty > 0) {
+    return unitPriceCents * qty;
+  }
+
+  return 0;
+}
+
+async function persistResolvedTotalCents(
+  db: ReturnType<typeof getServiceSupabase>,
+  saleId: string,
+  totalCents: number
+) {
+  if (!Number.isFinite(totalCents) || totalCents <= 0) return;
+
+  const { error } = await db
+    .from("pos_sales")
+    .update({ total: totalCents })
+    .eq("id", saleId);
+
+  if (error) {
+    logError("Failed to persist resolved POS total", {
+      saleId,
+      totalCents,
+      error: error.message,
+    });
+  } else {
+    logInfo("Persisted resolved POS total", { saleId, totalCents });
+  }
 }
 
 async function normalizeRpcResult(
   rawData: unknown,
   db: ReturnType<typeof getServiceSupabase>,
-  fallback: { soldBy: string; productId?: string; qty?: number; paymentMethod?: string },
+  fallback: { soldBy: string; productId?: string; qty?: number; paymentMethod?: string }
 ): Promise<NormalizedSaleResult | null> {
   const payload = pickRpcObject(rawData);
   const { saleId: candidateSaleId } = extractCandidateIds(payload);
@@ -215,13 +290,18 @@ async function normalizeRpcResult(
       return {
         saleId: row.saleId,
         createdAt: payload?.created_at ?? payload?.data?.created_at ?? row.createdAt,
-        totalCents: payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? row.totalCents,
+        totalCents:
+          payload?.total_cents ??
+          payload?.total ??
+          payload?.data?.total_cents ??
+          payload?.data?.total ??
+          row.totalCents,
         pointsEarned: payload?.points_earned ?? 0,
-        paymentReference: payload?.payment_reference ?? payload?.data?.payment_reference ?? row.paymentReference,
+        paymentReference:
+          payload?.payment_reference ?? payload?.data?.payment_reference ?? row.paymentReference,
       };
     }
   }
-
 
   const fallbackRow = await fetchRecentPosSaleFallback(db, fallback);
   if (fallbackRow) {
@@ -229,9 +309,17 @@ async function normalizeRpcResult(
     return {
       saleId: fallbackRow.saleId,
       createdAt: payload?.created_at ?? payload?.data?.created_at ?? fallbackRow.createdAt,
-      totalCents: payload?.total_cents ?? payload?.total ?? payload?.data?.total_cents ?? payload?.data?.total ?? fallbackRow.totalCents,
+      totalCents:
+        payload?.total_cents ??
+        payload?.total ??
+        payload?.data?.total_cents ??
+        payload?.data?.total ??
+        fallbackRow.totalCents,
       pointsEarned: payload?.points_earned ?? 0,
-      paymentReference: payload?.payment_reference ?? payload?.data?.payment_reference ?? fallbackRow.paymentReference,
+      paymentReference:
+        payload?.payment_reference ??
+        payload?.data?.payment_reference ??
+        fallbackRow.paymentReference,
     };
   }
 
@@ -262,7 +350,11 @@ async function updatePosSaleLoyaltySnapshot(input: {
   if (msg.includes("column pos_sales.customer_user_id does not exist")) {
     await service
       .from("pos_sales")
-      .update({ loyalty_status: input.status, loyalty_points_awarded: payload.loyalty_points_awarded, loyalty_error: input.loyaltyError })
+      .update({
+        loyalty_status: input.status,
+        loyalty_points_awarded: payload.loyalty_points_awarded,
+        loyalty_error: input.loyaltyError,
+      })
       .eq("id", input.saleId);
     return;
   }
@@ -289,23 +381,42 @@ export async function POST(req: Request) {
   const requestBody = await req.json();
   const parsed = createPosSaleSchema.safeParse(requestBody);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Payload inválido", details: parsed.error.flatten(), code: "INVALID_PAYLOAD" }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: "Payload inválido",
+        details: parsed.error.flatten(),
+        code: "INVALID_PAYLOAD",
+      },
+      { status: 400 }
+    );
   }
 
   const paymentMethod = parsed.data.paymentMethod;
   const paymentReference = parsed.data.paymentReference?.trim() || null;
 
   if (!VALID_PAYMENT_METHODS.has(paymentMethod)) {
-    return NextResponse.json({ error: "Método de pago inválido", code: "INVALID_PAYMENT_METHOD" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Método de pago inválido", code: "INVALID_PAYMENT_METHOD" },
+      { status: 400 }
+    );
   }
 
   if ((paymentMethod === "transfer" || paymentMethod === "card") && !paymentReference) {
-    return NextResponse.json({ error: "La referencia de pago es obligatoria para tarjeta y transferencia", code: "PAYMENT_REFERENCE_REQUIRED" }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: "La referencia de pago es obligatoria para tarjeta y transferencia",
+        code: "PAYMENT_REFERENCE_REQUIRED",
+      },
+      { status: 400 }
+    );
   }
 
   const item = parsed.data.items[0];
   if (!item?.productId) {
-    return NextResponse.json({ error: "Producto no informado", code: "PRODUCT_ID_REQUIRED" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Producto no informado", code: "PRODUCT_ID_REQUIRED" },
+      { status: 400 }
+    );
   }
   if (!item?.qty || item.qty <= 0) {
     return NextResponse.json({ error: "Cantidad inválida", code: "INVALID_QTY" }, { status: 400 });
@@ -317,10 +428,17 @@ export async function POST(req: Request) {
   if (customerEmail) {
     try {
       const service = getServiceSupabase();
-      const { data: profile } = await service.from("profiles").select("user_id").ilike("email", customerEmail).maybeSingle();
+      const { data: profile } = await service
+        .from("profiles")
+        .select("user_id")
+        .ilike("email", customerEmail)
+        .maybeSingle();
       customerUserId = profile?.user_id ?? null;
     } catch (error) {
-      logError("Customer lookup failed", { customerEmail, error: error instanceof Error ? error.message : String(error) });
+      logError("Customer lookup failed", {
+        customerEmail,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -354,7 +472,7 @@ export async function POST(req: Request) {
         hint: rpcError.hint,
         sqlState: rpcError.code,
       },
-      { status },
+      { status }
     );
   }
 
@@ -364,23 +482,25 @@ export async function POST(req: Request) {
   });
 
   const base = extractBaseFromPayload(rawRpcData);
-  let normalized: NormalizedSaleResult | null =
-    base.saleId
-      ? {
-          saleId: base.saleId,
-          createdAt: base.createdAt,
-          totalCents: base.totalCents,
-          pointsEarned: base.pointsEarned,
-          paymentReference: base.paymentReference,
-        }
-      : null;
+  let normalized: NormalizedSaleResult | null = base.saleId
+    ? {
+        saleId: base.saleId,
+        createdAt: base.createdAt,
+        totalCents: base.totalCents,
+        pointsEarned: base.pointsEarned,
+        paymentReference: base.paymentReference,
+      }
+    : null;
 
   if (!normalized) {
     let serviceForCritical: ReturnType<typeof getServiceSupabase>;
     try {
       serviceForCritical = getServiceSupabase();
     } catch {
-      return NextResponse.json({ error: "No se pudo inicializar servicio POS", code: "SERVICE_NOT_AVAILABLE" }, { status: 500 });
+      return NextResponse.json(
+        { error: "No se pudo inicializar servicio POS", code: "SERVICE_NOT_AVAILABLE" },
+        { status: 500 }
+      );
     }
 
     normalized = await normalizeRpcResult(rawRpcData, serviceForCritical, {
@@ -397,7 +517,7 @@ export async function POST(req: Request) {
         error: "No se pudo identificar el ID real de la venta POS para procesar fidelidad",
         code: "UNSUPPORTED_RPC_RESPONSE",
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 
@@ -412,9 +532,20 @@ export async function POST(req: Request) {
 
   try {
     const service = getServiceSupabase();
-    resolvedTotalCents = await resolvePosSaleTotalCents(service, normalized.saleId, normalized.totalCents);
-    logInfo("Resolved total cents", { saleId: normalized.saleId, resolvedTotalCents });
 
+    resolvedTotalCents = await resolvePosSaleTotalCents(
+      service,
+      normalized.saleId,
+      normalized.totalCents,
+      item.productId,
+      item.qty
+    );
+
+    if (resolvedTotalCents > 0) {
+      await persistResolvedTotalCents(service, normalized.saleId, resolvedTotalCents);
+    }
+
+    logInfo("Resolved total cents", { saleId: normalized.saleId, resolvedTotalCents });
     logInfo("Resolved customer user", { saleId: normalized.saleId, customerUserId, customerEmail });
     logInfo("Loyalty processing started", { saleId: normalized.saleId, sourceType: "pos_sale" });
 
@@ -460,7 +591,7 @@ export async function POST(req: Request) {
         .update({ loyalty_status: "error", loyalty_error: loyaltyErrorMessage })
         .eq("id", normalized.saleId);
     } catch {
-      // no-op: keep non-fatal semantics
+      // no-op
     }
 
     logError("Non-fatal post-processing error", {
@@ -483,6 +614,6 @@ export async function POST(req: Request) {
       loyaltyPointsAwarded,
       loyaltyError: loyaltyErrorMessage,
     },
-    { status: 201 },
+    { status: 201 }
   );
 }

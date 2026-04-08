@@ -1,4 +1,4 @@
-import { env } from "@/lib/env";
+import { serverEnv } from "@/lib/server-env";
 
 type UpsRateInput = {
   destinationPostalCode: string;
@@ -17,13 +17,13 @@ export type UpsRate = {
 let tokenCache: { token: string; expiresAt: number } | null = null;
 
 function getUpsBaseUrl() {
-  return env.UPS_ENVIRONMENT === "production"
+  return serverEnv.UPS_ENVIRONMENT === "production"
     ? "https://onlinetools.ups.com"
     : "https://wwwcie.ups.com";
 }
 
 async function getUpsToken() {
-  if (!env.UPS_CLIENT_ID || !env.UPS_CLIENT_SECRET) {
+  if (!serverEnv.UPS_CLIENT_ID || !serverEnv.UPS_CLIENT_SECRET) {
     throw new Error("UPS credentials are not configured");
   }
 
@@ -34,7 +34,7 @@ async function getUpsToken() {
   const tokenRes = await fetch(`${getUpsBaseUrl()}/security/v1/oauth/token`, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${Buffer.from(`${env.UPS_CLIENT_ID}:${env.UPS_CLIENT_SECRET}`).toString("base64")}`,
+      Authorization: `Basic ${Buffer.from(`${serverEnv.UPS_CLIENT_ID}:${serverEnv.UPS_CLIENT_SECRET}`).toString("base64")}`,
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: new URLSearchParams({ grant_type: "client_credentials" }),
@@ -70,7 +70,7 @@ function convertUpsServiceToInternal(serviceCode: string, amountCents: number): 
 }
 
 export async function getUpsRates(input: UpsRateInput): Promise<UpsRate[]> {
-  if (!env.UPS_ACCOUNT_NUMBER || !env.UPS_SHIPPER_ZIP) {
+  if (!serverEnv.UPS_ACCOUNT_NUMBER || !serverEnv.UPS_SHIPPER_ZIP) {
     throw new Error("UPS account configuration is incomplete");
   }
 
@@ -82,10 +82,10 @@ export async function getUpsRates(input: UpsRateInput): Promise<UpsRate[]> {
       },
       Shipment: {
         Shipper: {
-          ShipperNumber: env.UPS_ACCOUNT_NUMBER,
+          ShipperNumber: serverEnv.UPS_ACCOUNT_NUMBER,
           Address: {
-            PostalCode: env.UPS_SHIPPER_ZIP,
-            CountryCode: env.UPS_SHIPPER_COUNTRY,
+            PostalCode: serverEnv.UPS_SHIPPER_ZIP,
+            CountryCode: serverEnv.UPS_SHIPPER_COUNTRY,
           },
         },
         ShipTo: {

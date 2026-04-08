@@ -1,117 +1,175 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { requireOwnerApi } from "@/lib/auth";
+import { getServiceSupabase } from "@/lib/supabase";
 
-const importRowSchema = z.object({
-  itemNumber: z.string().min(1),
-  department: z.string().optional().default(""),
-  itemDescription: z.string().min(1),
-  qty: z.number(),
-  sellerCategory: z.string().optional().default(""),
-  category: z.string().min(1),
-  condition: z.string().optional().default(""),
-});
+type ParsedInventoryRow = {
+  importKey: string;
+  department: string;
+  itemDescription: string;
+  qty: number;
+  sellerCategory: string;
+  category: string;
+  condition: string;
+  unitRetail?: number | null;
+  extRetail?: number | null;
+  salesPrice?: number | null;
+  actualSalesPrice?: number | null;
+  vendor: string;
+  categoryCode: string;
+};
 
-const commitSchema = z.object({ rows: z.array(importRowSchema).min(1).max(5000) });
+function dollarsToCents(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) return null;
+  return Math.round(value * 100);
+}
 
-function slugifyCategory(value: string) {
-  return value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+function buildSyntheticSku(row: ParsedInventoryRow) {
+  return `csv-${row.importKey}`.slice(0, 120);
 }
 
 export async function POST(req: Request) {
   const auth = await requireOwnerApi();
   if ("error" in auth) return auth.error;
 
-  const parsed = commitSchema.safeParse(await req.json());
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  const body = await req.json().catch(() => null);
+  const rows = Array.isArray(body?.rows) ? (body.rows as ParsedInventoryRow[]) : [];
 
-  const rows = parsed.data.rows;
-  const summary = { inserted: 0, updated: 0, failed: 0 };
+  if (!rows.length) {
+    return NextResponse.json({ error: "No hay filas para importar" }, { status: 400 });
+  }
+
+  const supabase = getServiceSupabase();
+
+  let inserted = 0;
+  let updated = 0;
+  let failed = 0;
   const errors: string[] = [];
 
-  const categoryNames = [...new Set(rows.map((r) => r.category).filter(Boolean))];
-  const categorySlugs = categoryNames.map(slugifyCategory).filter(Boolean);
+  for (const row of rows) {
+    try {
+      const importKey = String(row.importKey ?? "").trim();
+      const itemDescription = String(row.itemDescription ?? "").trim();
+      const department = String(row.department ?? "").trim();
+      const sellerCategory = String(row.sellerCategory ?? "").trim();
+      const category = String(row.category ?? "").trim();
+      const condition = String(row.condition ?? "").trim();
+      const vendor = String(row.vendor ?? "").trim();
+      const categoryCode = String(row.categoryCode ?? "").trim();
+      const qty = Number(row.qty ?? 0);
 
-  const { data: existingCategories } = categorySlugs.length
-    ? await auth.supabase.from("categories").select("id,name,slug").in("slug", categorySlugs)
-    : { data: [] as Array<{ id: string; name: string; slug: string }> };
+      if (!itemDescription) {
+  failed += 1;
+  errors.push("Fila sin nombre de producto: datos inválidos");
+  continue;
+}
 
-  const categoryMap = new Map((existingCategories ?? []).map((c) => [c.slug, c.id]));
+      const salesPriceCents = dollarsToCents(row.salesPrice);
+      const unitRetailCents = dollarsToCents(row.unitRetail);
+      const extRetailCents = dollarsToCents(row.extRetail);
+      const actualSalesPriceCents = dollarsToCents(row.actualSalesPrice);
+      const syntheticSku = buildSyntheticSku(row);
 
-  for (const category of categoryNames) {
-    const slug = slugifyCategory(category);
-    if (!slug || categoryMap.has(slug)) continue;
+      const candidatesQuery = supabase
+  .from("products")
+  .select("id, base_price_cents, price_cents, item_description, vendor, category_code, condition, department, created_at")
+  .eq("item_description", itemDescription);
 
-    const { data: created } = await auth.supabase
-      .from("categories")
-      .insert({ name: category, slug })
-      .select("id,slug")
-      .single();
+if (vendor) {
+  candidatesQuery.eq("vendor", vendor);
+}
 
-    if (created) categoryMap.set(created.slug, created.id);
-  }
+if (categoryCode) {
+  candidatesQuery.eq("category_code", categoryCode);
+}
 
-  for (const [index, row] of rows.entries()) {
-    const categoryId = categoryMap.get(slugifyCategory(row.category)) ?? null;
-    if (!categoryId) {
-      summary.failed += 1;
-      errors.push(`Fila ${index + 1}: category inválida (${row.category})`);
-      continue;
-    }
+const lookup = await candidatesQuery.limit(10);
 
-    const payload = {
-      sku: row.itemNumber,
-      item_number: row.itemNumber,
-      name: row.itemDescription,
-      item_description: row.itemDescription,
-      department: row.department || null,
-      seller_category: row.sellerCategory || null,
-      category: row.category || null,
-      condition: row.condition || null,
-      category_id: categoryId,
-      base_stock: Math.max(0, Math.round(row.qty)),
-      qty: Math.max(0, Math.round(row.qty)),
-    };
+if (lookup.error) {
+  throw new Error(lookup.error.message);
+}
 
-    const { data: existing } = await auth.supabase
-      .from("products")
-      .select("id")
-      .or(`sku.eq.${row.itemNumber},item_number.eq.${row.itemNumber}`)
-      .maybeSingle();
+const candidates = lookup.data ?? [];
+const matchedProduct = candidates[0] ?? null;
 
-    if (existing?.id) {
-      const { error } = await auth.supabase.from("products").update(payload).eq("id", existing.id);
-      if (error) {
-        summary.failed += 1;
-        errors.push(`Fila ${index + 1}: ${error.message}`);
+      const basePayload = {
+            sku: syntheticSku,
+            item_number: importKey,
+            name: itemDescription,
+            department: department || null,
+            item_description: itemDescription || null,
+            seller_category: sellerCategory || null,
+            category: category || null,
+            condition: condition || null,
+            vendor: vendor || null,
+            category_code: categoryCode || null,
+            qty,
+            base_stock: qty,
+            unit_retail_cents: unitRetailCents,
+            ext_retail_cents: extRetailCents,
+            actual_sales_price_cents: actualSalesPriceCents,
+      };
+
+      if (matchedProduct?.id) {
+        const updatePayload = {
+  ...basePayload,
+  ...(salesPriceCents != null ? { price_cents: salesPriceCents } : {}),
+  base_price_cents:
+  matchedProduct.base_price_cents == null
+    ? salesPriceCents ?? matchedProduct.base_price_cents
+    : matchedProduct.base_price_cents,
+};
+
+        const { error: updateError } = await supabase
+          .from("products")
+          .update(updatePayload)
+          .eq("id", matchedProduct.id);
+
+        if (updateError) {
+          throw new Error(updateError.message);
+        }
+
+        updated += 1;
       } else {
-        summary.updated += 1;
+        const insertPayload = {
+  ...basePayload,
+  active: true,
+  featured: false,
+  featured_rank: 0,
+  has_variants: false,
+  redeemable: false,
+  points_price: null,
+  category_id: null,
+  description: null,
+  price_cents: salesPriceCents ?? 0,
+  base_price_cents: salesPriceCents ?? 0,
+};
+
+        const { error: insertError } = await supabase.from("products").insert(insertPayload);
+
+        if (insertError) {
+          throw new Error(insertError.message);
+        }
+
+        inserted += 1;
       }
-      continue;
-    }
-
-    const { error } = await auth.supabase.from("products").insert({
-      ...payload,
-      active: true,
-      featured: false,
-      featured_rank: 0,
-      has_variants: false,
-      tags: [],
-      base_price_cents: null,
-    });
-
-    if (error) {
-      summary.failed += 1;
-      errors.push(`Fila ${index + 1}: ${error.message}`);
-    } else {
-      summary.inserted += 1;
+    } catch (error) {
+      failed += 1;
+      errors.push(
+        `Item ${row.itemDescription ?? "sin descripción"}: ${
+          error instanceof Error ? error.message : "Error desconocido"
+        }`,
+      );
     }
   }
 
-  return NextResponse.json({ data: { summary, errors: errors.slice(0, 40) } });
+  return NextResponse.json({
+    data: {
+      summary: {
+        inserted,
+        updated,
+        failed,
+      },
+      errors,
+    },
+  });
 }

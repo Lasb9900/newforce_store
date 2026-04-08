@@ -64,13 +64,107 @@ function mergeCategoriesWithProducts(categories: CatalogCategory[], products: Pr
 
 export async function getProducts() {
   const sb = await getServerSupabase();
-  const { data } = await sb
+
+  const { data: productsData, error: productsError } = await sb
     .from("products")
-    .select("*, category:categories(*), images:product_images(*), variants:product_variants(*)")
-    .eq("active", true)
+    .select(`
+      id,
+      name,
+      description,
+      currency,
+      base_price_cents,
+      price_cents,
+      base_stock,
+      has_variants,
+      active,
+      featured,
+      featured_rank,
+      category_id,
+      tags,
+      sku,
+      item_number,
+      department,
+      item_description,
+      seller_category,
+      condition,
+      qty,
+      image_url,
+      redeemable,
+      points_price,
+      created_at,
+      updated_at
+    `)
     .order("created_at", { ascending: false });
 
-  return ((data ?? []) as Product[]).map(normalizeProduct);
+  if (productsError) {
+    console.error("[CATALOG_GET_PRODUCTS_ERROR_PRODUCTS]", productsError);
+    return [];
+  }
+
+  const productIds = (productsData ?? []).map((p) => p.id).filter(Boolean);
+
+  if (productIds.length === 0) {
+    console.log("[CATALOG_GET_PRODUCTS_COUNT]", 0);
+    console.log("[CATALOG_FIRST_PRODUCT_VARIANTS]", null);
+    return [];
+  }
+
+  const { data: imagesData, error: imagesError } = await sb
+    .from("product_images")
+    .select("id,product_id,url,sort_order")
+    .in("product_id", productIds)
+    .order("sort_order", { ascending: true });
+
+  if (imagesError) {
+    console.error("[CATALOG_GET_PRODUCTS_ERROR_IMAGES]", imagesError);
+  }
+
+  const { data: variantsData, error: variantsError } = await sb
+    .from("product_variants")
+    .select("id,product_id,variant_name,price_cents,stock,active,sku")
+    .in("product_id", productIds);
+
+  if (variantsError) {
+    console.error("[CATALOG_GET_PRODUCTS_ERROR_VARIANTS]", variantsError);
+  }
+
+  const imagesByProduct = new Map<string, unknown[]>();
+  for (const image of imagesData ?? []) {
+    const key = image.product_id;
+    if (!key) continue;
+    const list = imagesByProduct.get(key) ?? [];
+    list.push(image);
+    imagesByProduct.set(key, list);
+  }
+
+  const variantsByProduct = new Map<string, unknown[]>();
+  for (const variant of variantsData ?? []) {
+    const key = variant.product_id;
+    if (!key) continue;
+    const list = variantsByProduct.get(key) ?? [];
+    list.push(variant);
+    variantsByProduct.set(key, list);
+  }
+
+  const merged = (productsData ?? []).map((product) => ({
+    ...product,
+    images: imagesByProduct.get(product.id) ?? [],
+    variants: variantsByProduct.get(product.id) ?? [],
+  }));
+
+  console.log("[CATALOG_GET_PRODUCTS_COUNT]", merged.length);
+  console.log(
+    "[CATALOG_FIRST_PRODUCT_VARIANTS]",
+    merged[0]
+      ? {
+          id: merged[0].id,
+          has_variants: merged[0].has_variants,
+          variantsCount: Array.isArray(merged[0].variants) ? merged[0].variants.length : 0,
+        }
+      : null,
+  );
+
+  return (merged as unknown as Product[]).map(normalizeProduct);
 }
 
 export async function getCategories(products?: Product[]) {
